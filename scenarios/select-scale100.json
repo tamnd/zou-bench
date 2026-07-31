@@ -1,0 +1,9 @@
+{
+  "name": "select-scale100",
+  "init": false,
+  "scale": 100,
+  "clients": 8,
+  "threads": 8,
+  "duration": 60,
+  "builtin": "select-only"
+}

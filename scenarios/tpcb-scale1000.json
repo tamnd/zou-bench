@@ -1,0 +1,9 @@
+{
+  "name": "tpcb-scale1000",
+  "init": true,
+  "scale": 1000,
+  "clients": 32,
+  "threads": 10,
+  "duration": 300,
+  "builtin": "tpcb-like"
+}
