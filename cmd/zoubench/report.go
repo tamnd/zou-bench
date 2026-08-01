@@ -38,9 +38,13 @@ func cmdReport(argv []string) {
 		{"p50", func(r map[string]any) string { return nested(r, "latency_ms", "p50") }},
 		{"p95", func(r map[string]any) string { return nested(r, "latency_ms", "p95") }},
 		{"p99", func(r map[string]any) string { return nested(r, "latency_ms", "p99") }},
+		{"p999", func(r map[string]any) string { return nested(r, "latency_ms", "p999") }},
 		{"init s", func(r map[string]any) string { return num(r["init_seconds"]) }},
 		{"rss peak MB", func(r map[string]any) string { return kbToMB(nested(r, "server", "rss_peak_kb")) }},
 		{"cpu s", func(r map[string]any) string { return nested(r, "server", "cpu_s_total") }},
+		{"wal MB", func(r map[string]any) string { return bytesToMB(deep(r, "pg_delta", "wal", "wal_bytes")) }},
+		{"store +MB", func(r map[string]any) string { return bytesToMB(nested(r, "store", "bytes_delta")) }},
+		{"w-amp", func(r map[string]any) string { return nested(r, "store", "write_amplification") }},
 		{"date", func(r map[string]any) string {
 			d := str(r["date"])
 			if len(d) >= 10 {
@@ -103,4 +107,21 @@ func kbToMB(kb string) string {
 		return ""
 	}
 	return fmt.Sprintf("%d", int(f/1024+0.5))
+}
+
+func bytesToMB(b string) string {
+	var f float64
+	if _, err := fmt.Sscanf(b, "%g", &f); err != nil || f == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", int(f/(1024*1024)+0.5))
+}
+
+// deep digs two levels below a top level key, for pg_delta style maps.
+func deep(r map[string]any, outer, mid, inner string) string {
+	m, ok := r[outer].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return nested(m, mid, inner)
 }

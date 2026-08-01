@@ -1,0 +1,14 @@
+{
+  "name": "backblaze-b2",
+  "source": "https://www.backblaze.com/cloud-storage/pricing",
+  "dated": "2026-08-01",
+  "kind": "retail",
+  "storage_gb_month_usd": 0.006,
+  "put_per_1000_usd": 0,
+  "get_per_1000_usd": 0.0004,
+  "list_per_1000_usd": 0.004,
+  "delete_per_1000_usd": 0,
+  "egress_per_gb_usd": 0.01,
+  "min_storage_days": 0,
+  "notes": "uploads are free class A, egress free up to 3x monthly storage, verify before publishing"
+}

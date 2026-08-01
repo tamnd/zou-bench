@@ -7,65 +7,32 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tamnd/zou-bench/internal/cost"
+	"github.com/tamnd/zou-bench/internal/envinfo"
+	"github.com/tamnd/zou-bench/internal/pgbench"
+	"github.com/tamnd/zou-bench/internal/pgstats"
+	"github.com/tamnd/zou-bench/internal/sampler"
+	"github.com/tamnd/zou-bench/internal/scenario"
+	"github.com/tamnd/zou-bench/internal/storefs"
 )
-
-type scenario struct {
-	Name     string `json:"name"`
-	Init     bool   `json:"init"`
-	Scale    int    `json:"scale"`
-	Clients  int    `json:"clients"`
-	Threads  int    `json:"threads"`
-	Duration int    `json:"duration"`
-	Builtin  string `json:"builtin"`
-}
-
-func pgtool(name string) string {
-	if bin := os.Getenv("PGBIN"); bin != "" {
-		return filepath.Join(bin, name)
-	}
-	return name
-}
-
-// dsnArgs turns a key=value DSN into pgbench connection flags.
-func dsnArgs(dsn string) []string {
-	kv := map[string]string{}
-	for _, part := range strings.Fields(dsn) {
-		if k, v, ok := strings.Cut(part, "="); ok {
-			kv[k] = v
-		}
-	}
-	var args []string
-	if v := kv["host"]; v != "" {
-		args = append(args, "-h", v)
-	}
-	if v := kv["port"]; v != "" {
-		args = append(args, "-p", v)
-	}
-	if v := kv["user"]; v != "" {
-		args = append(args, "-U", v)
-	}
-	db := kv["dbname"]
-	if db == "" {
-		db = "postgres"
-	}
-	return append(args, db)
-}
 
 func cmdRun(argv []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	dsn := fs.String("dsn", "", "key=value libpq DSN")
 	label := fs.String("label", "", "pg18, zou-minio, neon, ...")
 	datadir := fs.String("datadir", "", "local server datadir for process sampling")
+	storedir := fs.String("storedir", "", "local store path for footprint and amplification")
+	pricecard := fs.String("pricecard", "", "price card name from pricecards/ for a cost block")
+	cardsdir := fs.String("cardsdir", "pricecards", "price card directory")
 	outdir := fs.String("outdir", "results", "result directory")
 	// Accept the scenario path before or after the flags.
 	var rest []string
 	for _, a := range argv {
-		if !strings.HasPrefix(a, "-") && strings.HasSuffix(a, ".json") {
+		if !strings.HasPrefix(a, "-") && strings.HasSuffix(a, ".json") && !strings.Contains(a, string(filepath.Separator)+"pricecards"+string(filepath.Separator)) {
 			rest = append(rest, a)
 		}
 	}
@@ -74,74 +41,124 @@ func cmdRun(argv []string) {
 		usage()
 	}
 
-	raw, err := os.ReadFile(rest[0])
+	sc, doc, err := scenario.Load(rest[0])
 	die(err)
-	var sc scenario
-	die(json.Unmarshal(raw, &sc))
-	if sc.Clients == 0 {
-		sc.Clients = 8
-	}
-	if sc.Threads == 0 {
-		sc.Threads = sc.Clients
-	}
-	if sc.Duration == 0 {
-		sc.Duration = 60
-	}
-	var config map[string]any
-	die(json.Unmarshal(raw, &config))
 
-	conn := dsnArgs(*dsn)
-	host, _ := os.Hostname()
+	conn := pgbench.DSNArgs(*dsn)
+	psql := pgbench.Tool("psql")
 	result := map[string]any{
 		"scenario": sc.Name,
 		"label":    *label,
 		"date":     time.Now().UTC().Format("2006-01-02T15:04:05Z07:00"),
-		"host":     host,
-		"config":   config,
+		"config":   doc,
+		"env":      envinfo.Capture(),
+	}
+	if v := pgstats.Version(psql, conn); v != "" {
+		result["server_version"] = v
+	}
+	if s := pgstats.Settings(psql, conn); s != nil {
+		result["server_settings"] = s
+	}
+	if *datadir != "" {
+		if fsinfo := envinfo.Filesystem(*datadir); fsinfo != nil {
+			result["datadir_fs"] = fsinfo
+		}
+	}
+	if *storedir != "" {
+		if fsinfo := envinfo.Filesystem(*storedir); fsinfo != nil {
+			result["store_fs"] = fsinfo
+		}
 	}
 
-	var sampler *treeSampler
+	var tree *sampler.Tree
 	if *datadir != "" {
 		pid, err := serverPid(*datadir)
 		die(err)
-		sampler = newTreeSampler(pid)
-		sampler.start()
+		tree = sampler.NewTree(pid)
+		tree.Start()
+	}
+	sys := sampler.NewSystem()
+	sys.Start()
+
+	var storeBefore storefs.Footprint
+	if *storedir != "" {
+		storeBefore, err = storefs.Measure(*storedir)
+		die(err)
 	}
 
 	if sc.Init {
 		t0 := time.Now()
-		cmd := exec.Command(pgtool("pgbench"), append([]string{"-i", "-q", "-s", strconv.Itoa(sc.Scale)}, conn...)...)
-		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-		die(cmd.Run())
+		cmd := exec.Command(pgbench.Tool("pgbench"), append([]string{"-i", "-q", "-s", strconv.Itoa(sc.Scale)}, conn...)...)
+		var initOut strings.Builder
+		cmd.Stdout, cmd.Stderr = &initOut, &initOut
+		err := cmd.Run()
+		fmt.Fprint(os.Stderr, initOut.String())
+		die(err)
 		result["init_seconds"] = round1(time.Since(t0).Seconds())
+		if total, phases := pgbench.ParseInitPhases(initOut.String()); total > 0 {
+			result["init_phases_s"] = phases
+		}
 	}
+
+	if sc.Warmup > 0 {
+		warm := exec.Command(pgbench.Tool("pgbench"), append(benchArgs(sc, sc.Warmup, "", rest[0]), conn...)...)
+		warm.Stdout, warm.Stderr = os.Stderr, os.Stderr
+		die(warm.Run())
+	}
+
+	before := pgstats.Snapshot(psql, conn)
 
 	logdir, err := os.MkdirTemp("", "zoubench")
 	die(err)
 	defer os.RemoveAll(logdir)
 
-	args := []string{
-		"-c", strconv.Itoa(sc.Clients),
-		"-j", strconv.Itoa(sc.Threads),
-		"-T", strconv.Itoa(sc.Duration),
-		"-r",
-		"-l", "--log-prefix", filepath.Join(logdir, "pgbench_log"),
-	}
-	if sc.Builtin != "" && sc.Builtin != "tpcb-like" {
-		args = append(args, "-b", sc.Builtin)
-	}
-	args = append(args, conn...)
-	cmd := exec.Command(pgtool("pgbench"), args...)
+	args := benchArgs(sc, sc.Duration, logdir, rest[0])
+	cmd := exec.Command(pgbench.Tool("pgbench"), append(args, conn...)...)
 	var stdout strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, os.Stderr
 	die(cmd.Run())
 
-	parseSummary(stdout.String(), result)
-	result["latency_ms"] = percentiles(parseTxnLogs(logdir))
-	result["raw_summary"] = stdout.String()
+	after := pgstats.Snapshot(psql, conn)
 
-	if sampler != nil {
-		result["server"] = sampler.finish()
+	pgbench.ParseSummary(stdout.String(), result)
+	txns := pgbench.ParseTxnLogs(logdir)
+	result["latency_ms"] = pgbench.Percentiles(txns)
+	result["buckets_30s"] = pgbench.Buckets(txns, 30)
+	result["raw_summary"] = stdout.String()
+	if d := pgstats.Delta(before, after); len(d) > 0 {
+		result["pg_delta"] = d
+	}
+
+	if tree != nil {
+		result["server"] = tree.Finish()
+	}
+	result["system"] = sys.Finish()
+
+	if *storedir != "" {
+		storeAfter, err := storefs.Measure(*storedir)
+		die(err)
+		store := map[string]any{
+			"path":          *storedir,
+			"bytes_before":  storeBefore.Bytes,
+			"bytes_after":   storeAfter.Bytes,
+			"bytes_delta":   storeAfter.Bytes - storeBefore.Bytes,
+			"objects_after": storeAfter.Objects,
+		}
+		// Write amplification: bytes the store grew per byte of WAL the
+		// workload generated. Checkpoints and manifest churn land here.
+		if d, ok := result["pg_delta"].(map[string]map[string]float64); ok {
+			if wal, ok := d["wal"]["wal_bytes"]; ok && wal > 0 {
+				store["wal_bytes"] = int64(wal)
+				store["write_amplification"] = round3(float64(storeAfter.Bytes-storeBefore.Bytes) / wal)
+			}
+		}
+		result["store"] = store
+
+		if *pricecard != "" {
+			card, err := cost.Find(*cardsdir, *pricecard)
+			die(err)
+			result["cost"] = cost.Compute(card, cost.Usage{StorageBytes: storeAfter.Bytes})
+		}
 	}
 
 	die(os.MkdirAll(*outdir, 0o755))
@@ -154,12 +171,37 @@ func cmdRun(argv []string) {
 
 	brief := map[string]any{}
 	for k, v := range result {
-		if k != "raw_summary" && k != "config" {
+		switch k {
+		case "raw_summary", "config", "server_settings", "env", "buckets_30s":
+		default:
 			brief[k] = v
 		}
 	}
 	pretty, _ := json.MarshalIndent(brief, "", "  ")
 	fmt.Println(string(pretty))
+}
+
+// benchArgs builds the pgbench invocation for a window of seconds.
+// logdir empty means no per transaction log, which is how warmup runs.
+func benchArgs(sc scenario.Scenario, seconds int, logdir, scenarioPath string) []string {
+	args := []string{
+		"-c", strconv.Itoa(sc.Clients),
+		"-j", strconv.Itoa(sc.Threads),
+		"-T", strconv.Itoa(seconds),
+		"-r",
+	}
+	if logdir != "" {
+		args = append(args, "-l", "--log-prefix", filepath.Join(logdir, "pgbench_log"))
+	}
+	if sc.Rate > 0 {
+		args = append(args, "-R", strconv.Itoa(sc.Rate))
+	}
+	if sc.Script != "" {
+		args = append(args, "-f", filepath.Join(filepath.Dir(scenarioPath), sc.Script))
+	} else if sc.Builtin != "" && sc.Builtin != "tpcb-like" {
+		args = append(args, "-b", sc.Builtin)
+	}
+	return args
 }
 
 // without returns argv with the given positional entries removed, so the
@@ -187,104 +229,6 @@ func serverPid(datadir string) (int, error) {
 	}
 	first, _, _ := strings.Cut(string(raw), "\n")
 	return strconv.Atoi(strings.TrimSpace(first))
-}
-
-var summaryPatterns = []struct {
-	re  *regexp.Regexp
-	key string
-	num bool
-}{
-	{regexp.MustCompile(`(?m)^tps = ([0-9.]+)`), "tps", false},
-	{regexp.MustCompile(`latency average = ([0-9.]+) ms`), "latency_avg_ms", false},
-	{regexp.MustCompile(`initial connection time = ([0-9.]+) ms`), "connect_ms", false},
-	{regexp.MustCompile(`number of transactions actually processed: (\d+)`), "transactions", true},
-	{regexp.MustCompile(`number of failed transactions: (\d+)`), "failed", true},
-}
-
-var stmtRe = regexp.MustCompile(`^\s+([0-9.]+)\s+\d+\s+(.+)`)
-
-func parseSummary(text string, result map[string]any) {
-	for _, p := range summaryPatterns {
-		if m := p.re.FindStringSubmatch(text); m != nil {
-			if p.num {
-				n, _ := strconv.Atoi(m[1])
-				result[p.key] = n
-			} else {
-				f, _ := strconv.ParseFloat(m[1], 64)
-				result[p.key] = f
-			}
-		}
-	}
-	stmts := map[string]float64{}
-	inStmts := false
-	for _, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, "statement latencies") {
-			inStmts = true
-			continue
-		}
-		if !inStmts {
-			continue
-		}
-		if m := stmtRe.FindStringSubmatch(line); m != nil {
-			f, _ := strconv.ParseFloat(m[1], 64)
-			stmt := strings.TrimSpace(m[2])
-			if len(stmt) > 60 {
-				stmt = stmt[:60]
-			}
-			stmts[stmt] = f
-		}
-	}
-	if len(stmts) > 0 {
-		result["statement_latency_ms"] = stmts
-	}
-}
-
-// parseTxnLogs reads pgbench -l files, one line per transaction with
-// the latency in microseconds as the third field.
-func parseTxnLogs(logdir string) []float64 {
-	var latencies []float64
-	entries, _ := os.ReadDir(logdir)
-	for _, e := range entries {
-		if !strings.HasPrefix(e.Name(), "pgbench_log") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(logdir, e.Name()))
-		if err != nil {
-			continue
-		}
-		for _, line := range strings.Split(string(raw), "\n") {
-			parts := strings.Fields(line)
-			if len(parts) < 3 {
-				continue
-			}
-			if us, err := strconv.Atoi(parts[2]); err == nil {
-				latencies = append(latencies, float64(us)/1000.0)
-			}
-		}
-	}
-	return latencies
-}
-
-func percentiles(values []float64) map[string]float64 {
-	out := map[string]float64{}
-	if len(values) == 0 {
-		return out
-	}
-	sort.Float64s(values)
-	for _, p := range []int{50, 95, 99} {
-		idx := len(values) * p / 100
-		if idx >= len(values) {
-			idx = len(values) - 1
-		}
-		out[fmt.Sprintf("p%d", p)] = round3(values[idx])
-	}
-	out["max"] = round3(values[len(values)-1])
-	sum := 0.0
-	for _, v := range values {
-		sum += v
-	}
-	out["mean"] = round3(sum / float64(len(values)))
-	return out
 }
 
 func round1(v float64) float64 { return float64(int(v*10+0.5)) / 10 }

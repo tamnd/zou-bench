@@ -25,7 +25,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: zoubench run <scenario.json> --dsn <dsn> --label <label> [--datadir <dir>] [--outdir <dir>]")
+	fmt.Fprintln(os.Stderr, "usage: zoubench run <scenario.json> --dsn <dsn> --label <label> [--datadir <dir>] [--storedir <path>] [--pricecard <name>] [--outdir <dir>]")
 	fmt.Fprintln(os.Stderr, "       zoubench report <results...>")
 	os.Exit(2)
 }

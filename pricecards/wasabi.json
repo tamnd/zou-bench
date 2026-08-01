@@ -1,0 +1,14 @@
+{
+  "name": "wasabi",
+  "source": "https://wasabi.com/pricing",
+  "dated": "2026-08-01",
+  "kind": "retail",
+  "storage_gb_month_usd": 0.00699,
+  "put_per_1000_usd": 0,
+  "get_per_1000_usd": 0,
+  "list_per_1000_usd": 0,
+  "delete_per_1000_usd": 0,
+  "egress_per_gb_usd": 0,
+  "min_storage_days": 90,
+  "notes": "no api or egress fees under fair use, 90 day minimum storage, verify before publishing"
+}

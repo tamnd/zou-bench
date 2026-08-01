@@ -1,0 +1,14 @@
+{
+  "name": "gcs-standard",
+  "source": "https://cloud.google.com/storage/pricing",
+  "dated": "2026-08-01",
+  "kind": "retail",
+  "storage_gb_month_usd": 0.02,
+  "put_per_1000_usd": 0.005,
+  "get_per_1000_usd": 0.0004,
+  "list_per_1000_usd": 0.005,
+  "delete_per_1000_usd": 0,
+  "egress_per_gb_usd": 0.12,
+  "min_storage_days": 0,
+  "notes": "us regions standard class, verify before publishing"
+}
