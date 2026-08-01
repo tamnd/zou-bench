@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tamnd/zou-bench/internal/cost"
-	"github.com/tamnd/zou-bench/internal/envinfo"
-	"github.com/tamnd/zou-bench/internal/pgbench"
-	"github.com/tamnd/zou-bench/internal/pgstats"
-	"github.com/tamnd/zou-bench/internal/sampler"
-	"github.com/tamnd/zou-bench/internal/scenario"
-	"github.com/tamnd/zou-bench/internal/storefs"
-	"github.com/tamnd/zou-bench/internal/zoustats"
+	"github.com/tamnd/zou-bench/cost"
+	"github.com/tamnd/zou-bench/envinfo"
+	"github.com/tamnd/zou-bench/pgbench"
+	"github.com/tamnd/zou-bench/pgstats"
+	"github.com/tamnd/zou-bench/sampler"
+	"github.com/tamnd/zou-bench/scenario"
+	"github.com/tamnd/zou-bench/storefs"
+	"github.com/tamnd/zou-bench/zoustats"
 )
 
 func cmdRun(argv []string) {
@@ -30,6 +30,7 @@ func cmdRun(argv []string) {
 	statsfile := fs.String("zoustats", "", "zou store op counter file, what ZOU_STORE_STATS pointed at")
 	pricecard := fs.String("pricecard", "", "price card name from pricecards/ for a cost block")
 	cardsdir := fs.String("cardsdir", "pricecards", "price card directory")
+	simulated := fs.String("simulated", "", "mark the run simulated with this sim spec, defaults to ZOU_STORE_SIM or ZOU_STORE_DELAY when either is set")
 	outdir := fs.String("outdir", "results", "result directory")
 	// Accept the scenario path before or after the flags.
 	var rest []string
@@ -54,6 +55,21 @@ func cmdRun(argv []string) {
 		"date":     time.Now().UTC().Format("2006-01-02T15:04:05Z07:00"),
 		"config":   doc,
 		"env":      envinfo.Capture(),
+	}
+	// A run under simulated store behavior is stamped so its numbers
+	// can never pass as real. The env fallback covers the usual case
+	// where the harness and the server share a shell, the flag covers
+	// a server started elsewhere with sim vars this process cannot see.
+	simSpec := *simulated
+	if simSpec == "" {
+		if v := os.Getenv("ZOU_STORE_SIM"); v != "" {
+			simSpec = v
+		} else if v := os.Getenv("ZOU_STORE_DELAY"); v != "" {
+			simSpec = "delay:" + v
+		}
+	}
+	if simSpec != "" {
+		result["simulated"] = simSpec
 	}
 	if v := pgstats.Version(psql, conn); v != "" {
 		result["server_version"] = v
@@ -183,8 +199,20 @@ func cmdRun(argv []string) {
 		}
 	}
 
-	if *pricecard != "" {
-		card, err := cost.Find(*cardsdir, *pricecard)
+	if n, ok := result["transactions"].(int); ok {
+		usage.Txns = int64(n)
+	}
+
+	// A simulated run against a provider profile prices itself with
+	// that provider's card by default: the op counts are real, only
+	// the latency was simulated, so the dollars answer what this run
+	// would have cost there. An explicit --pricecard still wins.
+	cardName := *pricecard
+	if cardName == "" && simSpec != "" {
+		cardName = simCard(simSpec)
+	}
+	if cardName != "" {
+		card, err := cost.Find(*cardsdir, cardName)
 		die(err)
 		result["cost"] = cost.Compute(card, usage)
 	}
@@ -207,6 +235,29 @@ func cmdRun(argv []string) {
 	}
 	pretty, _ := json.MarshalIndent(brief, "", "  ")
 	fmt.Println(string(pretty))
+}
+
+// simCard maps a ZOU_STORE_SIM profile name to the price card that
+// matches it, so a simulated run picks the right dollars without a
+// flag. Specs with overrides map by their head, calibration file paths
+// and unknown profiles map to nothing.
+func simCard(spec string) string {
+	head, _, _ := strings.Cut(spec, ",")
+	switch head {
+	case "s3-standard":
+		return "aws-s3-standard"
+	case "s3-express":
+		return "aws-s3-express-one-zone"
+	case "r2":
+		return "cloudflare-r2"
+	case "gcs":
+		return "gcs-standard"
+	case "b2":
+		return "backblaze-b2"
+	case "wasabi":
+		return "wasabi"
+	}
+	return ""
 }
 
 // benchArgs builds the pgbench invocation for a window of seconds.

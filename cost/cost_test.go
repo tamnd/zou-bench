@@ -31,6 +31,23 @@ func TestRetailComputePricesStorageAndMeasuredOps(t *testing.T) {
 	if got["egress_usd"].(float64) != 0.18 {
 		t.Fatalf("egress = %v", got["egress_usd"])
 	}
+	if _, present := got["usd_per_million_txns"]; present {
+		t.Fatal("per txn cost should be absent when no transactions were counted")
+	}
+}
+
+func TestTxnsTurnOpsCostIntoDollarsPerMillionCommits(t *testing.T) {
+	card := Card{Name: "c", Kind: "retail", PutPer1000: 0.005, GetPer1000: 0.0004}
+	got := Compute(card, Usage{
+		Puts:     100_000,
+		Gets:     1_000_000,
+		Measured: true,
+		Txns:     50_000,
+	})
+	// 0.5 + 0.4 = 0.9 dollars over 50k txns is 18 dollars per million.
+	if got["usd_per_million_txns"].(float64) != 18.0 {
+		t.Fatalf("per million txns = %v", got["usd_per_million_txns"])
+	}
 }
 
 func TestUnmeasuredOpsSayUnmeasuredInsteadOfGuessing(t *testing.T) {
@@ -52,7 +69,7 @@ func TestSelfhostedAmortizesTheBoxOverItsDisk(t *testing.T) {
 }
 
 func TestEveryCheckedInCardLoads(t *testing.T) {
-	dir := "../../pricecards"
+	dir := "../pricecards"
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)

@@ -46,6 +46,11 @@ type Usage struct {
 	Deletes      int64
 	EgressBytes  int64
 	Measured     bool
+	// Txns is how many transactions the workload processed while the
+	// ops above accumulated, so the report can quote dollars per
+	// million transactions, the number that decides whether a design
+	// is cheap.
+	Txns int64
 }
 
 func Load(path string) (Card, error) {
@@ -98,6 +103,13 @@ func Compute(c Card, u Usage) map[string]any {
 		float64(u.Deletes)/1000*c.DeletePer1000
 	out["ops_usd"] = round4(ops)
 	out["egress_usd"] = round4(float64(u.EgressBytes) / gb * c.EgressPerGB)
+	// Request cost per million transactions. Egress stays out because
+	// it prices readback traffic, not the workload's commits, and
+	// storage stays out because it is a monthly rate, not a per run
+	// spend.
+	if u.Txns > 0 {
+		out["usd_per_million_txns"] = round4(ops / float64(u.Txns) * 1e6)
+	}
 	return out
 }
 

@@ -19,13 +19,16 @@ func main() {
 		cmdRun(os.Args[2:])
 	case "report":
 		cmdReport(os.Args[2:])
+	case "probe":
+		cmdProbe(os.Args[2:])
 	default:
 		usage()
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: zoubench run <scenario.json> --dsn <dsn> --label <label> [--datadir <dir>] [--storedir <path>] [--pricecard <name>] [--outdir <dir>]")
+	fmt.Fprintln(os.Stderr, "usage: zoubench run <scenario.json> --dsn <dsn> --label <label> [--datadir <dir>] [--storedir <path>] [--pricecard <name>] [--simulated <spec>] [--outdir <dir>]")
 	fmt.Fprintln(os.Stderr, "       zoubench report <results...>")
+	fmt.Fprintln(os.Stderr, "       zoubench probe --endpoint <url> --bucket <bucket> --name <profile> [--region <r>] [--samples <n>] [--payload <bytes>]")
 	os.Exit(2)
 }
