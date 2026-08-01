@@ -32,7 +32,16 @@ func cmdReport(argv []string) {
 	})
 
 	cols := []column{
-		{"label", func(r map[string]any) string { return str(r["label"]) }},
+		// A simulated run wears the marker in every table it appears
+		// in, per the M1b rules: simulated numbers hold a place until
+		// a real bucket run replaces them, they never pass as real.
+		{"label", func(r map[string]any) string {
+			l := str(r["label"])
+			if r["simulated"] != nil {
+				l += " (sim)"
+			}
+			return l
+		}},
 		{"tps", func(r map[string]any) string { return num(r["tps"]) }},
 		{"avg ms", func(r map[string]any) string { return num(r["latency_avg_ms"]) }},
 		{"p50", func(r map[string]any) string { return nested(r, "latency_ms", "p50") }},
@@ -45,6 +54,7 @@ func cmdReport(argv []string) {
 		{"wal MB", func(r map[string]any) string { return bytesToMB(deep(r, "pg_delta", "wal", "wal_bytes")) }},
 		{"store +MB", func(r map[string]any) string { return bytesToMB(nested(r, "store", "bytes_delta")) }},
 		{"w-amp", func(r map[string]any) string { return nested(r, "store", "write_amplification") }},
+		{"$/M txns", func(r map[string]any) string { return nested(r, "cost", "usd_per_million_txns") }},
 		{"date", func(r map[string]any) string {
 			d := str(r["date"])
 			if len(d) >= 10 {

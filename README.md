@@ -9,6 +9,7 @@ Numbers produced against simulated store latency are labeled simulated and get r
 ## Running
 
 The harness is a single Go binary with no dependencies beyond pgbench.
+Every package lives at the module root, so `github.com/tamnd/zou-bench/cost`, `probe`, `pgbench`, and the rest import as a library from other projects, and `cmd/zoubench` is a thin CLI over the same code.
 
 ```
 go build -o zoubench ./cmd/zoubench
@@ -44,6 +45,30 @@ From zou's own op counters when `--zoustats` names the counter file `ZOU_STORE_S
 From the price cards in `pricecards/` when `--pricecard` names one: storage dollars per month for the measured footprint, and op dollars only when op counts were actually measured, otherwise the field says unmeasured. Every card carries its source url and the date it was checked, and the self hosted cards amortize a real monthly box price over its disk.
 
 Environment capture rounds it out: cpu model, core count, RAM, kernel, OS, and the filesystem and mount options behind the data dir and store dir, all recorded into the result json.
+
+## Probing a provider
+
+`zoubench probe` measures a real endpoint's latency curve and writes a calibration file that zou's `ZOU_STORE_SIM` loads in place of its built in profiles, so simulated runs replay numbers someone actually measured instead of numbers from a marketing page.
+
+```
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...
+./zoubench probe --endpoint https://s3.us-east-1.amazonaws.com --bucket my-bucket --name aws-s3-standard
+ZOU_STORE_SIM=pricecards/aws-s3-standard.calibration.json zou dev ...
+```
+
+The probe speaks plain SigV4 over path style requests, so it works against AWS, R2, GCS interop, B2, Wasabi, and MinIO with the same flags.
+It runs put, get, list, and delete sequentially from the machine you invoke it on, which is the point: the file captures the latency zou would pay from that network position.
+A few 16 MB round trips estimate throughput, throttle responses are counted into the profile's slowdown rate rather than the latency curve, and every key the probe writes is deleted before it exits.
+The file lands next to the price cards by default, `pricecards/<name>.calibration.json`.
+
+## Simulated runs and cost simulation
+
+A run is stamped simulated when `ZOU_STORE_SIM` or `ZOU_STORE_DELAY` is set in the harness environment, or when `--simulated <spec>` says the server was started under one elsewhere.
+Stamped runs carry the sim spec in the result json and wear a `(sim)` marker in every report table, per the M1b rules: simulated numbers hold a place until a real bucket run replaces them.
+
+Cost simulation rides on the stamp: a run simulated as `s3-standard` prices its measured op counts with the matching aws-s3-standard card automatically, so a local MinIO run answers what the same workload would have cost on AWS.
+The op counts are real, only the latency was simulated, and an explicit `--pricecard` still wins.
+When op counts and transactions were both measured, the cost block adds `usd_per_million_txns`, the request dollars per million transactions, which the report shows as `$/M txns`.
 
 ## Scenarios
 
