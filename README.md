@@ -14,7 +14,7 @@ The harness is a single Go binary with no dependencies beyond pgbench.
 go build -o zoubench ./cmd/zoubench
 export PGBIN=/path/to/pg18/bin
 ./zoubench run scenarios/tpcb-scale100.json --dsn "host=/tmp port=5432 dbname=postgres" --label pg18 --datadir /tmp/pgdata
-./zoubench run scenarios/tpcb-scale100.json --dsn "host=/tmp port=5490 dbname=postgres" --label zou-minio --datadir /tmp/zou-data --storedir /tmp/zou-store --pricecard minio-server3
+./zoubench run scenarios/tpcb-scale100.json --dsn "host=/tmp port=5490 dbname=postgres" --label zou-minio --datadir /tmp/zou-data --storedir /tmp/zou-store --zoustats /tmp/zou-runtime/store-stats --pricecard minio-server3
 ./zoubench run scenarios/select-scale100.json --dsn "host=neon-host port=5432 dbname=postgres user=bench" --label neon-selfhosted
 ./zoubench report results/*.json
 ```
@@ -38,6 +38,8 @@ From the whole system on Linux, sampled every second: per device disk reads, wri
 From the server itself: version, non default settings, and before and after snapshots of pg_stat_wal, pg_stat_bgwriter, pg_stat_checkpointer, pg_stat_database, and aggregated pg_stat_io, reported as numeric deltas so wal bytes, fsyncs, checkpoints, and buffer evictions during the run are exact.
 
 From the store when `--storedir` names the zou store path: bytes and object count before and after, the byte delta, and write amplification computed as store growth over wal bytes written.
+
+From zou's own op counters when `--zoustats` names the counter file `ZOU_STORE_STATS` pointed at (`zou dev` keeps it at `<runtime>/store-stats`): per op kind and key class counts and bytes, latency p50/p95/p99, io errors, and CAS conflicts, taken as the difference between snapshots at run start and end so only this run's traffic counts. When these are present the cost block prices measured op counts instead of saying unmeasured.
 
 From the price cards in `pricecards/` when `--pricecard` names one: storage dollars per month for the measured footprint, and op dollars only when op counts were actually measured, otherwise the field says unmeasured. Every card carries its source url and the date it was checked, and the self hosted cards amortize a real monthly box price over its disk.
 

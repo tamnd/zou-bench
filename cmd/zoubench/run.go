@@ -18,6 +18,7 @@ import (
 	"github.com/tamnd/zou-bench/internal/sampler"
 	"github.com/tamnd/zou-bench/internal/scenario"
 	"github.com/tamnd/zou-bench/internal/storefs"
+	"github.com/tamnd/zou-bench/internal/zoustats"
 )
 
 func cmdRun(argv []string) {
@@ -26,6 +27,7 @@ func cmdRun(argv []string) {
 	label := fs.String("label", "", "pg18, zou-minio, neon, ...")
 	datadir := fs.String("datadir", "", "local server datadir for process sampling")
 	storedir := fs.String("storedir", "", "local store path for footprint and amplification")
+	statsfile := fs.String("zoustats", "", "zou store op counter file, what ZOU_STORE_STATS pointed at")
 	pricecard := fs.String("pricecard", "", "price card name from pricecards/ for a cost block")
 	cardsdir := fs.String("cardsdir", "pricecards", "price card directory")
 	outdir := fs.String("outdir", "results", "result directory")
@@ -86,6 +88,16 @@ func cmdRun(argv []string) {
 		die(err)
 	}
 
+	// Store op counters accumulate for the life of one zou boot, so
+	// the run's own ops are the difference between here and the end.
+	// Init counts on purpose: loading the data is part of what the
+	// run cost.
+	var opsBefore zoustats.Counters
+	if *statsfile != "" {
+		opsBefore, err = zoustats.Read(*statsfile)
+		die(err)
+	}
+
 	if sc.Init {
 		t0 := time.Now()
 		cmd := exec.Command(pgbench.Tool("pgbench"), append([]string{"-i", "-q", "-s", strconv.Itoa(sc.Scale)}, conn...)...)
@@ -134,9 +146,11 @@ func cmdRun(argv []string) {
 	}
 	result["system"] = sys.Finish()
 
+	usage := cost.Usage{}
 	if *storedir != "" {
 		storeAfter, err := storefs.Measure(*storedir)
 		die(err)
+		usage.StorageBytes = storeAfter.Bytes
 		store := map[string]any{
 			"path":          *storedir,
 			"bytes_before":  storeBefore.Bytes,
@@ -153,12 +167,26 @@ func cmdRun(argv []string) {
 			}
 		}
 		result["store"] = store
+	}
 
-		if *pricecard != "" {
-			card, err := cost.Find(*cardsdir, *pricecard)
-			die(err)
-			result["cost"] = cost.Compute(card, cost.Usage{StorageBytes: storeAfter.Bytes})
+	if *statsfile != "" {
+		opsAfter, err := zoustats.Read(*statsfile)
+		die(err)
+		delta, err := zoustats.Diff(opsBefore, opsAfter)
+		die(err)
+		result["store_ops"] = zoustats.Report(delta)
+		if t := zoustats.Sum(delta); t.AnyTraffic {
+			usage.Puts, usage.Gets = t.Puts, t.Gets
+			usage.Lists, usage.Deletes = t.Lists, t.Deletes
+			usage.EgressBytes = t.GetBytes
+			usage.Measured = true
 		}
+	}
+
+	if *pricecard != "" {
+		card, err := cost.Find(*cardsdir, *pricecard)
+		die(err)
+		result["cost"] = cost.Compute(card, usage)
 	}
 
 	die(os.MkdirAll(*outdir, 0o755))
