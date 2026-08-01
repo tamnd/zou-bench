@@ -1,0 +1,247 @@
+// Package pgbench execs pgbench and turns its outputs into numbers:
+// the summary block, the -r per statement latencies, the -i init phase
+// breakdown, and the -l per transaction log, which is the only honest
+// source for percentiles.
+package pgbench
+
+import (
+	"math"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// Tool returns the path of a postgres client binary, honoring PGBIN so
+// the vendored build's tools win over anything on PATH.
+func Tool(name string) string {
+	if bin := os.Getenv("PGBIN"); bin != "" {
+		return filepath.Join(bin, name)
+	}
+	return name
+}
+
+// DSNArgs turns a key=value libpq DSN into pgbench and psql flags.
+func DSNArgs(dsn string) []string {
+	kv := map[string]string{}
+	for _, part := range strings.Fields(dsn) {
+		if k, v, ok := strings.Cut(part, "="); ok {
+			kv[k] = v
+		}
+	}
+	var args []string
+	if v := kv["host"]; v != "" {
+		args = append(args, "-h", v)
+	}
+	if v := kv["port"]; v != "" {
+		args = append(args, "-p", v)
+	}
+	if v := kv["user"]; v != "" {
+		args = append(args, "-U", v)
+	}
+	db := kv["dbname"]
+	if db == "" {
+		db = "postgres"
+	}
+	return append(args, db)
+}
+
+var summaryPatterns = []struct {
+	re  *regexp.Regexp
+	key string
+	num bool
+}{
+	{regexp.MustCompile(`(?m)^tps = ([0-9.]+)`), "tps", false},
+	{regexp.MustCompile(`latency average = ([0-9.]+) ms`), "latency_avg_ms", false},
+	{regexp.MustCompile(`latency stddev = ([0-9.]+) ms`), "latency_stddev_ms", false},
+	{regexp.MustCompile(`initial connection time = ([0-9.]+) ms`), "connect_ms", false},
+	{regexp.MustCompile(`number of transactions actually processed: (\d+)`), "transactions", true},
+	{regexp.MustCompile(`number of failed transactions: (\d+)`), "failed", true},
+}
+
+var stmtRe = regexp.MustCompile(`^\s+([0-9.]+)\s+\d+\s+(.+)`)
+
+// ParseSummary extracts the headline numbers and the -r per statement
+// table from a pgbench run's stdout into result.
+func ParseSummary(text string, result map[string]any) {
+	for _, p := range summaryPatterns {
+		if m := p.re.FindStringSubmatch(text); m != nil {
+			if p.num {
+				n, _ := strconv.Atoi(m[1])
+				result[p.key] = n
+			} else {
+				f, _ := strconv.ParseFloat(m[1], 64)
+				result[p.key] = f
+			}
+		}
+	}
+	stmts := map[string]float64{}
+	inStmts := false
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "statement latencies") {
+			inStmts = true
+			continue
+		}
+		if !inStmts {
+			continue
+		}
+		if m := stmtRe.FindStringSubmatch(line); m != nil {
+			f, _ := strconv.ParseFloat(m[1], 64)
+			stmt := strings.TrimSpace(m[2])
+			if len(stmt) > 60 {
+				stmt = stmt[:60]
+			}
+			stmts[stmt] = f
+		}
+	}
+	if len(stmts) > 0 {
+		result["statement_latency_ms"] = stmts
+	}
+}
+
+var initDoneRe = regexp.MustCompile(`done in ([0-9.]+) s \((.+)\)`)
+var initPhaseRe = regexp.MustCompile(`([a-z -]+?) ([0-9.]+) s`)
+
+// ParseInitPhases reads the closing line of pgbench -i, which breaks
+// the wall time into phases like "client-side generate 200.31 s,
+// vacuum 30.01 s, primary keys 70.22 s". The phase split is what makes
+// a slow init diagnosable from the result file alone.
+func ParseInitPhases(text string) (float64, map[string]float64) {
+	m := initDoneRe.FindStringSubmatch(text)
+	if m == nil {
+		return 0, nil
+	}
+	total, _ := strconv.ParseFloat(m[1], 64)
+	phases := map[string]float64{}
+	for _, pm := range initPhaseRe.FindAllStringSubmatch(m[2], -1) {
+		f, _ := strconv.ParseFloat(pm[2], 64)
+		phases[strings.TrimSpace(pm[1])] = f
+	}
+	return total, phases
+}
+
+// Txn is one line of the pgbench -l per transaction log.
+type Txn struct {
+	LatencyMS float64
+	Epoch     int64
+}
+
+// ParseTxnLogs reads every pgbench_log file in dir. Log line format:
+// client_id transaction_no time_us script_no epoch_s epoch_us.
+func ParseTxnLogs(dir string) []Txn {
+	var txns []Txn
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "pgbench_log") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			parts := strings.Fields(line)
+			if len(parts) < 5 {
+				continue
+			}
+			us, err1 := strconv.Atoi(parts[2])
+			epoch, err2 := strconv.ParseInt(parts[4], 10, 64)
+			if err1 != nil || err2 != nil {
+				continue
+			}
+			txns = append(txns, Txn{LatencyMS: float64(us) / 1000.0, Epoch: epoch})
+		}
+	}
+	return txns
+}
+
+// Percentiles computes the latency distribution over every transaction.
+func Percentiles(txns []Txn) map[string]float64 {
+	out := map[string]float64{}
+	if len(txns) == 0 {
+		return out
+	}
+	values := make([]float64, len(txns))
+	for i, t := range txns {
+		values[i] = t.LatencyMS
+	}
+	sort.Float64s(values)
+	pick := func(p float64) float64 {
+		idx := int(float64(len(values)) * p)
+		if idx >= len(values) {
+			idx = len(values) - 1
+		}
+		return values[idx]
+	}
+	out["p50"] = round3(pick(0.50))
+	out["p90"] = round3(pick(0.90))
+	out["p95"] = round3(pick(0.95))
+	out["p99"] = round3(pick(0.99))
+	out["p999"] = round3(pick(0.999))
+	out["max"] = round3(values[len(values)-1])
+	sum := 0.0
+	for _, v := range values {
+		sum += v
+	}
+	mean := sum / float64(len(values))
+	out["mean"] = round3(mean)
+	varsum := 0.0
+	for _, v := range values {
+		varsum += (v - mean) * (v - mean)
+	}
+	out["stddev"] = round3(math.Sqrt(varsum / float64(len(values))))
+	return out
+}
+
+// Bucket is one progress window over the run.
+type Bucket struct {
+	Second int64   `json:"t"`
+	Txns   int     `json:"txns"`
+	TPS    float64 `json:"tps"`
+	P50    float64 `json:"p50_ms"`
+	P99    float64 `json:"p99_ms"`
+}
+
+// Buckets slices the transaction log into fixed windows so warmup,
+// steady state, and any late degradation stay visible. An average over
+// the whole run hides all three.
+func Buckets(txns []Txn, width int64) []Bucket {
+	if len(txns) == 0 || width <= 0 {
+		return nil
+	}
+	byWindow := map[int64][]float64{}
+	var start int64 = math.MaxInt64
+	for _, t := range txns {
+		if t.Epoch < start {
+			start = t.Epoch
+		}
+	}
+	for _, t := range txns {
+		w := (t.Epoch - start) / width
+		byWindow[w] = append(byWindow[w], t.LatencyMS)
+	}
+	windows := make([]int64, 0, len(byWindow))
+	for w := range byWindow {
+		windows = append(windows, w)
+	}
+	sort.Slice(windows, func(i, j int) bool { return windows[i] < windows[j] })
+	var out []Bucket
+	for _, w := range windows {
+		vals := byWindow[w]
+		sort.Float64s(vals)
+		p50 := vals[len(vals)/2]
+		p99 := vals[min(len(vals)*99/100, len(vals)-1)]
+		out = append(out, Bucket{
+			Second: w * width,
+			Txns:   len(vals),
+			TPS:    round3(float64(len(vals)) / float64(width)),
+			P50:    round3(p50),
+			P99:    round3(p99),
+		})
+	}
+	return out
+}
+
+func round3(v float64) float64 { return math.Round(v*1000) / 1000 }

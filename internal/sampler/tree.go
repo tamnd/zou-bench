@@ -1,4 +1,9 @@
-package main
+// Package sampler watches the system while a benchmark runs: the
+// server process tree for RSS and CPU, and on Linux the whole box for
+// disk, network, page cache, and swap. Everything is sampled, deltaed,
+// and kept as a coarse timeline, because a single end to end number
+// cannot show a leak or a mid run stall.
+package sampler
 
 import (
 	"os"
@@ -9,12 +14,12 @@ import (
 	"time"
 )
 
-// treeSampler samples RSS and cumulative CPU of a process tree twice a
+// Tree samples RSS and cumulative CPU of a process tree twice a
 // second. The tree is rediscovered from ps on every sample, so backends
 // that appear mid run are counted from their first sample. Disk io
 // bytes come from /proc/<pid>/io when it exists, so they are Linux only
 // and reported as null elsewhere.
-type treeSampler struct {
+type Tree struct {
 	root    int
 	samples []treeSample
 	stop    chan struct{}
@@ -22,18 +27,20 @@ type treeSampler struct {
 }
 
 type treeSample struct {
+	at        time.Time
 	procs     int
 	rssKB     int64
 	cpuS      float64
+	majflt    *int64
 	diskRead  *int64
 	diskWrite *int64
 }
 
-func newTreeSampler(rootPid int) *treeSampler {
-	return &treeSampler{root: rootPid, stop: make(chan struct{}), done: make(chan struct{})}
+func NewTree(rootPid int) *Tree {
+	return &Tree{root: rootPid, stop: make(chan struct{}), done: make(chan struct{})}
 }
 
-func (s *treeSampler) start() {
+func (s *Tree) Start() {
 	go func() {
 		defer close(s.done)
 		for {
@@ -49,7 +56,7 @@ func (s *treeSampler) start() {
 	}()
 }
 
-func (s *treeSampler) treePids() []int {
+func (s *Tree) treePids() []int {
 	out, err := exec.Command("ps", "-ax", "-o", "pid=,ppid=").Output()
 	if err != nil {
 		return nil
@@ -83,7 +90,7 @@ func (s *treeSampler) treePids() []int {
 	return pids
 }
 
-func (s *treeSampler) sampleOnce() (treeSample, bool) {
+func (s *Tree) sampleOnce() (treeSample, bool) {
 	pids := s.treePids()
 	if len(pids) == 0 {
 		return treeSample{}, false
@@ -96,7 +103,7 @@ func (s *treeSampler) sampleOnce() (treeSample, bool) {
 	if err != nil {
 		return treeSample{}, false
 	}
-	sample := treeSample{procs: len(pids)}
+	sample := treeSample{at: time.Now(), procs: len(pids)}
 	for _, line := range strings.Split(string(out), "\n") {
 		parts := strings.Fields(line)
 		if len(parts) != 2 {
@@ -106,7 +113,7 @@ func (s *treeSampler) sampleOnce() (treeSample, bool) {
 		sample.rssKB += rss
 		sample.cpuS += parsePsTime(parts[1])
 	}
-	var read, write int64
+	var read, write, faults int64
 	haveIO := true
 	for _, pid := range pids {
 		raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/io")
@@ -125,9 +132,21 @@ func (s *treeSampler) sampleOnce() (treeSample, bool) {
 				}
 			}
 		}
+		if stat, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat"); err == nil {
+			// Field 12 (1-based) after the comm field is majflt. comm can
+			// hold spaces, so cut at the closing paren first.
+			if _, rest, ok := strings.Cut(string(stat), ") "); ok {
+				fields := strings.Fields(rest)
+				if len(fields) > 9 {
+					n, _ := strconv.ParseInt(fields[9], 10, 64)
+					faults += n
+				}
+			}
+		}
 	}
 	if haveIO {
 		sample.diskRead, sample.diskWrite = &read, &write
+		sample.majflt = &faults
 	}
 	return sample, true
 }
@@ -152,7 +171,10 @@ func parsePsTime(text string) float64 {
 	return days*86400 + parts[0]*3600 + parts[1]*60 + parts[2]
 }
 
-func (s *treeSampler) finish() map[string]any {
+// Finish stops sampling and reduces the samples to peaks, medians,
+// deltas, a 10 s RSS timeline, and an RSS slope over the run. A flat
+// slope on a long run is the leak check.
+func (s *Tree) Finish() map[string]any {
 	close(s.stop)
 	<-s.done
 	if len(s.samples) == 0 {
@@ -182,9 +204,62 @@ func (s *treeSampler) finish() map[string]any {
 	if first.diskRead != nil && last.diskRead != nil {
 		out["disk_read_bytes"] = *last.diskRead - *first.diskRead
 		out["disk_write_bytes"] = *last.diskWrite - *first.diskWrite
+		out["major_faults"] = *last.majflt - *first.majflt
 	} else {
 		out["disk_read_bytes"] = nil
 		out["disk_write_bytes"] = nil
+		out["major_faults"] = nil
+	}
+	out["rss_timeline_kb"] = timeline(s.samples, 10*time.Second)
+	out["rss_slope_kb_per_min"] = slope(s.samples)
+	return out
+}
+
+// timeline reduces samples to one RSS value per width, the last sample
+// in each window.
+func timeline(samples []treeSample, width time.Duration) []int64 {
+	if len(samples) == 0 {
+		return nil
+	}
+	start := samples[0].at
+	var out []int64
+	current := int64(-1)
+	for _, sm := range samples {
+		w := int64(sm.at.Sub(start) / width)
+		if w != current {
+			out = append(out, sm.rssKB)
+			current = w
+		} else {
+			out[len(out)-1] = sm.rssKB
+		}
 	}
 	return out
 }
+
+// slope compares the median RSS of the first and last quarter of the
+// run, in KB per minute. Warmup growth lands in the first quarter, so
+// a leak shows as a positive slope that persists across quarters.
+func slope(samples []treeSample) float64 {
+	if len(samples) < 8 {
+		return 0
+	}
+	quarter := len(samples) / 4
+	head := medianRSS(samples[:quarter])
+	tail := medianRSS(samples[len(samples)-quarter:])
+	minutes := samples[len(samples)-1].at.Sub(samples[0].at).Minutes() * 3 / 4
+	if minutes <= 0 {
+		return 0
+	}
+	return round1(float64(tail-head) / minutes)
+}
+
+func medianRSS(samples []treeSample) int64 {
+	vals := make([]int64, len(samples))
+	for i, sm := range samples {
+		vals[i] = sm.rssKB
+	}
+	sort.Slice(vals, func(i, j int) bool { return vals[i] < vals[j] })
+	return vals[len(vals)/2]
+}
+
+func round1(v float64) float64 { return float64(int(v*10+0.5)) / 10 }

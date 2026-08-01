@@ -14,7 +14,7 @@ The harness is a single Go binary with no dependencies beyond pgbench.
 go build -o zoubench ./cmd/zoubench
 export PGBIN=/path/to/pg18/bin
 ./zoubench run scenarios/tpcb-scale100.json --dsn "host=/tmp port=5432 dbname=postgres" --label pg18 --datadir /tmp/pgdata
-./zoubench run scenarios/tpcb-scale100.json --dsn "host=/tmp port=54312 dbname=postgres" --label zou-minio --datadir /tmp/zou-data
+./zoubench run scenarios/tpcb-scale100.json --dsn "host=/tmp port=5490 dbname=postgres" --label zou-minio --datadir /tmp/zou-data --storedir /tmp/zou-store --pricecard minio-server3
 ./zoubench run scenarios/select-scale100.json --dsn "host=neon-host port=5432 dbname=postgres user=bench" --label neon-selfhosted
 ./zoubench report results/*.json
 ```
@@ -27,15 +27,21 @@ The server under test is started by you, not the harness, so each system's own s
 
 ## What a run captures
 
-From pgbench: tps, average latency, initial connection time, transactions processed and failed, per statement latencies from `-r`.
+From pgbench: tps, average latency and stddev, initial connection time, transactions processed and failed, per statement latencies from `-r`, and init wall time split into its phases (generate, vacuum, primary keys) when the scenario loads data.
 
-From the per transaction log (`-l`): real latency percentiles p50, p95, p99, max, and mean over every transaction, not summary approximations.
+From the per transaction log (`-l`): real latency percentiles p50, p90, p95, p99, p999, max, mean, and stddev over every transaction, plus 30 second buckets with per bucket tps, p50, and p99 so a flat average cannot hide a stall.
 
-From the server process tree, sampled twice a second when `--datadir` names a local server: process count, RSS peak and median across the whole tree, cumulative CPU seconds consumed during the run, disk read and write bytes on Linux via /proc.
+From the server process tree, sampled when `--datadir` names a local server: process count, RSS peak and median across the whole tree, an RSS timeline and its slope in kb per minute for leak detection, cumulative CPU seconds, major page faults, and process level disk read and write bytes on Linux via /proc.
 
-From the scenario: init wall time when the scenario loads data.
+From the whole system on Linux, sampled every second: per device disk reads, writes, and utilization, network bytes in and out, page cache growth, swap in and out, and a disk write timeline. On other platforms this block says supported false instead of inventing zeros.
 
-Planned, tracked in the M1b issue: object store op counts and bytes by kind scraped from zou's stats, commit latency histograms, cost per workload computed from op counts and current price cards, jitter and tail injection profiles for simulated stores.
+From the server itself: version, non default settings, and before and after snapshots of pg_stat_wal, pg_stat_bgwriter, pg_stat_checkpointer, pg_stat_database, and aggregated pg_stat_io, reported as numeric deltas so wal bytes, fsyncs, checkpoints, and buffer evictions during the run are exact.
+
+From the store when `--storedir` names the zou store path: bytes and object count before and after, the byte delta, and write amplification computed as store growth over wal bytes written.
+
+From the price cards in `pricecards/` when `--pricecard` names one: storage dollars per month for the measured footprint, and op dollars only when op counts were actually measured, otherwise the field says unmeasured. Every card carries its source url and the date it was checked, and the self hosted cards amortize a real monthly box price over its disk.
+
+Environment capture rounds it out: cpu model, core count, RAM, kernel, OS, and the filesystem and mount options behind the data dir and store dir, all recorded into the result json.
 
 ## Scenarios
 
@@ -44,6 +50,8 @@ Planned, tracked in the M1b issue: object store op counts and bytes by kind scra
 - `tpcb-scale1000`: scale 1000, dataset larger than RAM on most boxes, 32 clients, 5 min.
 
 Scenario files are plain json, add one per workload and keep them small and explicit.
+Fields: name, init, scale, clients, threads, duration, warmup, builtin, script, rate.
+warmup runs the same workload for that many seconds before the measured leg, script points at a custom pgbench script instead of a builtin, and rate caps the throughput for latency under load runs.
 
 ## Comparing fairly
 

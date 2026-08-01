@@ -1,0 +1,14 @@
+{
+  "name": "cloudflare-r2",
+  "source": "https://developers.cloudflare.com/r2/pricing/",
+  "dated": "2026-08-01",
+  "kind": "retail",
+  "storage_gb_month_usd": 0.015,
+  "put_per_1000_usd": 0.0045,
+  "get_per_1000_usd": 0.00036,
+  "list_per_1000_usd": 0.0045,
+  "delete_per_1000_usd": 0,
+  "egress_per_gb_usd": 0,
+  "min_storage_days": 0,
+  "notes": "class A covers PUT and LIST, class B covers GET, egress is free, verify before publishing"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "aws-s3-standard",
+  "source": "https://aws.amazon.com/s3/pricing/",
+  "dated": "2026-08-01",
+  "kind": "retail",
+  "storage_gb_month_usd": 0.023,
+  "put_per_1000_usd": 0.005,
+  "get_per_1000_usd": 0.0004,
+  "list_per_1000_usd": 0.005,
+  "delete_per_1000_usd": 0,
+  "egress_per_gb_usd": 0.09,
+  "min_storage_days": 0,
+  "notes": "us-east-1 first tier, verify against source before publishing any dollar figure"
+}
