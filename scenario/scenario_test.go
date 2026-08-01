@@ -36,12 +36,12 @@ func TestLoadRejectsANamelessScenario(t *testing.T) {
 }
 
 func TestEveryCheckedInScenarioLoads(t *testing.T) {
-	entries, err := os.ReadDir("../../scenarios")
+	entries, err := os.ReadDir("../scenarios")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if _, _, err := Load(filepath.Join("../../scenarios", e.Name())); err != nil {
+		if _, _, err := Load(filepath.Join("../scenarios", e.Name())); err != nil {
 			t.Fatal(err)
 		}
 	}

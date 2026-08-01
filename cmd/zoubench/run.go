@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tamnd/zou-bench/internal/cost"
-	"github.com/tamnd/zou-bench/internal/envinfo"
-	"github.com/tamnd/zou-bench/internal/pgbench"
-	"github.com/tamnd/zou-bench/internal/pgstats"
-	"github.com/tamnd/zou-bench/internal/sampler"
-	"github.com/tamnd/zou-bench/internal/scenario"
-	"github.com/tamnd/zou-bench/internal/storefs"
-	"github.com/tamnd/zou-bench/internal/zoustats"
+	"github.com/tamnd/zou-bench/cost"
+	"github.com/tamnd/zou-bench/envinfo"
+	"github.com/tamnd/zou-bench/pgbench"
+	"github.com/tamnd/zou-bench/pgstats"
+	"github.com/tamnd/zou-bench/sampler"
+	"github.com/tamnd/zou-bench/scenario"
+	"github.com/tamnd/zou-bench/storefs"
+	"github.com/tamnd/zou-bench/zoustats"
 )
 
 func cmdRun(argv []string) {

@@ -52,7 +52,7 @@ func TestSelfhostedAmortizesTheBoxOverItsDisk(t *testing.T) {
 }
 
 func TestEveryCheckedInCardLoads(t *testing.T) {
-	dir := "../../pricecards"
+	dir := "../pricecards"
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
