@@ -1,0 +1,10 @@
+{
+  "name": "commit-8c",
+  "init": true,
+  "scale": 1,
+  "clients": 8,
+  "threads": 8,
+  "duration": 60,
+  "warmup": 10,
+  "script": "commit.sql"
+}
