@@ -41,6 +41,11 @@ func TestEveryCheckedInScenarioLoads(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
+		// Custom pgbench scripts live next to the scenarios that name
+		// them, only the json documents are scenarios.
+		if filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
 		if _, _, err := Load(filepath.Join("../scenarios", e.Name())); err != nil {
 			t.Fatal(err)
 		}
