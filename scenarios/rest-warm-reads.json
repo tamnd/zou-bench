@@ -1,0 +1,56 @@
+{
+  "name": "rest-warm-reads",
+  "kind": "rest",
+  "clients": 8,
+  "duration": 60,
+  "warmup": 15,
+  "setup": "rest-demo.sql",
+  "requests": [
+    {
+      "name": "row-by-pk",
+      "path": "/rest/v1/bench_todos?id=eq.{{rand:1:20000}}&select=id,title,done",
+      "auth": "user",
+      "weight": 4
+    },
+    {
+      "name": "page-of-20",
+      "path": "/rest/v1/bench_todos?select=id,title,done&order=id.desc&limit=20",
+      "auth": "user",
+      "weight": 3
+    },
+    {
+      "name": "filtered-page",
+      "path": "/rest/v1/bench_todos?done=is.false&list=eq.{{rand:1:200}}&select=id,title&order=id&limit=20",
+      "auth": "user",
+      "weight": 2
+    },
+    {
+      "name": "embed-lists-todos",
+      "path": "/rest/v1/bench_lists?select=id,name,bench_todos(id,title)&limit=10",
+      "auth": "user",
+      "weight": 1
+    },
+    {
+      "name": "count-exact",
+      "path": "/rest/v1/bench_todos?select=id&limit=1",
+      "auth": "user",
+      "header": { "prefer": "count=exact" },
+      "expect": 206,
+      "weight": 1
+    },
+    {
+      "name": "rpc-stats",
+      "method": "POST",
+      "path": "/rest/v1/rpc/bench_todo_stats",
+      "body": "{}",
+      "auth": "user",
+      "weight": 1
+    },
+    {
+      "name": "anon-notes",
+      "path": "/rest/v1/bench_notes?select=id,title&order=id&limit=20",
+      "auth": "anon",
+      "weight": 2
+    }
+  ]
+}

@@ -7,10 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/tamnd/zou-bench/resthttp"
 )
 
 type Scenario struct {
-	Name    string `json:"name"`
+	Name string `json:"name"`
+	// Kind is pgbench when empty, or rest for a scenario the http
+	// driver sends. The two share clients, threads, duration, warmup
+	// and rate, and nothing else.
+	Kind    string `json:"kind"`
 	Init    bool   `json:"init"`
 	Scale   int    `json:"scale"`
 	Clients int    `json:"clients"`
@@ -29,7 +35,18 @@ type Scenario struct {
 	// Rate limited runs measure latency at a fixed load, which is the
 	// honest way to compare tail latency across systems.
 	Rate int `json:"rate"`
+	// Setup is a sql file applied before a rest run, relative to the
+	// scenario file. The http driver cannot create its own data, and
+	// the schema it measures against belongs with the workload rather
+	// than in whoever's shell started the server.
+	Setup string `json:"setup"`
+	// Requests is the rest workload. Each entry carries a name, a
+	// method, a path, which token to send, and a weight.
+	Requests []resthttp.Request `json:"requests"`
 }
+
+// IsREST reports whether the http driver owns this scenario.
+func (s Scenario) IsREST() bool { return s.Kind == "rest" }
 
 // Load reads a scenario and returns it along with the raw document,
 // which goes into the result file verbatim so a result always carries
@@ -45,6 +62,9 @@ func Load(path string) (Scenario, map[string]any, error) {
 	}
 	if sc.Name == "" {
 		return Scenario{}, nil, fmt.Errorf("%s: scenario has no name", path)
+	}
+	if sc.IsREST() && len(sc.Requests) == 0 {
+		return Scenario{}, nil, fmt.Errorf("%s: a rest scenario needs requests", path)
 	}
 	if sc.Clients == 0 {
 		sc.Clients = 8
