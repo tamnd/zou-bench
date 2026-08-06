@@ -9,11 +9,14 @@ import (
 	"time"
 )
 
-// sockDir makes a short-lived directory directly under /tmp, because
-// t.TempDir() paths overflow the 104 byte unix socket limit on macOS.
+// sockDir makes a short-lived directory with a short name under the
+// system temp dir, because t.TempDir() embeds the test name and the
+// resulting socket path overflows the roughly 104 byte unix socket
+// path limit on macOS. Windows has no /tmp at all, which is why the
+// base comes from the system rather than being spelled out.
 func sockDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "pgwire")
+	dir, err := os.MkdirTemp("", "pgw")
 	if err != nil {
 		t.Fatal(err)
 	}
