@@ -22,8 +22,15 @@ begin
   if not exists (select 1 from pg_roles where rolname = 'service_role') then
     create role service_role nologin noinherit bypassrls;
   end if;
+  -- PostgREST connects as one role and switches to the token's role per
+  -- request. zou has no use for it and creating it changes nothing there.
+  if not exists (select 1 from pg_roles where rolname = 'authenticator') then
+    create role authenticator login noinherit;
+  end if;
 end
 $$;
+
+grant anon, authenticated, service_role to authenticator;
 
 create schema if not exists auth;
 

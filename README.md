@@ -55,7 +55,7 @@ The numbers land under the same keys, `tps` and `latency_ms` and the rest, so a 
 ```
 ZOU=/path/to/zou PGBIN=/path/to/pg/bin scripts/start-zou-dev.sh /tmp/zoudev
 ./zoubench rest scenarios/rest-warm-reads.json \
-    --url http://127.0.0.1:54321 --label zou-rest \
+    --url http://127.0.0.1:54321/rest/v1 --label zou-rest \
     --jwt-secret super-secret-jwt-token-with-at-least-32-characters-long \
     --dsn "host=127.0.0.1 port=54311 dbname=postgres user=$(id -un)" \
     --datadir /tmp/zoudev/runtime/pgdata --zoustats /tmp/zoudev/runtime/store-stats
@@ -109,6 +109,8 @@ warmup runs the same workload for that many seconds before the measured leg, scr
 A scenario with `kind` set to `rest` is driven by `zoubench rest` instead, and adds two fields: `setup`, the sql file applied before the run, and `requests`, the workload itself.
 A request carries a name, a method and path, a weight in the mix, the token it uses (`anon`, `service`, or `user`), an optional body and Prefer header, and the status it expects.
 `{{rand:lo:hi}}` and `{{hex}}` in a path are substituted per request, so a row by primary key run reads a different row every time rather than one very warm page.
+
+Paths are written without an api prefix and `--url` carries it, which is what lets one scenario ask the same questions of two servers that mount their api in different places: zou answers under `/rest/v1`, a bare PostgREST answers at the root.
 
 ## Comparing fairly
 
