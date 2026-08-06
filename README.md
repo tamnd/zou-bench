@@ -21,6 +21,7 @@ export PGBIN=/path/to/pg18/bin
 ```
 
 `run` executes one scenario against one server and writes a dated json result file.
+`rest` does the same over http against a REST api instead of over the wire protocol.
 `report` merges result files into markdown tables grouped by scenario, one row per label.
 
 The server under test is started by you, not the harness, so each system's own startup procedure stays authoritative.
@@ -45,6 +46,30 @@ From zou's own op counters when `--zoustats` names the counter file `ZOU_STORE_S
 From the price cards in `pricecards/` when `--pricecard` names one: storage dollars per month for the measured footprint, and op dollars only when op counts were actually measured, otherwise the field says unmeasured. Every card carries its source url and the date it was checked, and the self hosted cards amortize a real monthly box price over its disk.
 
 Environment capture rounds it out: cpu model, core count, RAM, kernel, OS, and the filesystem and mount options behind the data dir and store dir, all recorded into the result json.
+
+## REST runs
+
+`zoubench rest` drives a Supabase style REST api the way an application does, over keep alive connections with a mix of request shapes, and writes the same result json shape `run` writes.
+The numbers land under the same keys, `tps` and `latency_ms` and the rest, so a REST run and a pgbench run merge into the same report tables and the same result book.
+
+```
+ZOU=/path/to/zou PGBIN=/path/to/pg/bin scripts/start-zou-dev.sh /tmp/zoudev
+./zoubench rest scenarios/rest-warm-reads.json \
+    --url http://127.0.0.1:54321 --label zou-rest \
+    --jwt-secret super-secret-jwt-token-with-at-least-32-characters-long \
+    --dsn "host=127.0.0.1 port=54311 dbname=postgres user=$(id -un)" \
+    --datadir /tmp/zoudev/runtime/pgdata --zoustats /tmp/zoudev/runtime/store-stats
+```
+
+The scenario's `setup` names a sql file applied with psql before the run, so the tenant a run measures is created by the run itself and two boxes measure the same rows.
+The harness mints its own tokens from `--jwt-secret`, an anon key, a service key, and a user token per `--user`, which is why the secret is a flag rather than something copied out of a log.
+Each request in the workload names the token it goes out with, so an anon read and an authenticated read under RLS are separate lines in the result rather than one blended average.
+
+A request that answers with a status the workload did not expect is counted as an error and its time is thrown away, not averaged in.
+This matters more than it sounds: a wall of 401s is the fastest a server ever answers, and a harness that timed them would publish its best numbers on the day it was most broken.
+The run prints a warning naming the first few, and the result json keeps them under `failures`.
+
+Beyond the pgbench block, a REST run records per request latency distributions under `per_request`, the status code histogram, bytes read, and 30 second buckets, and it takes the same pg_stat, process tree, system, and zou op counter captures a `run` takes when the flags name a local server.
 
 ## Probing a provider
 
@@ -75,10 +100,15 @@ When op counts and transactions were both measured, the cost block adds `usd_per
 - `tpcb-scale100`: pgbench tpcb-like, scale 100, 8 clients, 60 s, with data load.
 - `select-scale100`: pgbench select-only on the loaded scale 100 data.
 - `tpcb-scale1000`: scale 1000, dataset larger than RAM on most boxes, 32 clients, 5 min.
+- `rest-warm-reads`: the REST read mix a small app makes, 8 clients, 60 s, against the tenant `rest-demo.sql` builds.
 
 Scenario files are plain json, add one per workload and keep them small and explicit.
 Fields: name, init, scale, clients, threads, duration, warmup, builtin, script, rate.
 warmup runs the same workload for that many seconds before the measured leg, script points at a custom pgbench script instead of a builtin, and rate caps the throughput for latency under load runs.
+
+A scenario with `kind` set to `rest` is driven by `zoubench rest` instead, and adds two fields: `setup`, the sql file applied before the run, and `requests`, the workload itself.
+A request carries a name, a method and path, a weight in the mix, the token it uses (`anon`, `service`, or `user`), an optional body and Prefer header, and the status it expects.
+`{{rand:lo:hi}}` and `{{hex}}` in a path are substituted per request, so a row by primary key run reads a different row every time rather than one very warm page.
 
 ## Comparing fairly
 

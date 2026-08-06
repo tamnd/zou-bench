@@ -9,9 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/tamnd/zou-bench/latency"
 )
 
 // Tool returns the path of a postgres client binary, honoring PGBIN so
@@ -157,42 +158,20 @@ func ParseTxnLogs(dir string) []Txn {
 	return txns
 }
 
+// samples turns the transaction log into what the latency package
+// works on, so pgbench runs and REST runs are summarized by the same
+// code and their tables can be read against each other.
+func samples(txns []Txn) []latency.Sample {
+	out := make([]latency.Sample, len(txns))
+	for i, t := range txns {
+		out[i] = latency.Sample{MS: t.LatencyMS, Epoch: t.Epoch}
+	}
+	return out
+}
+
 // Percentiles computes the latency distribution over every transaction.
 func Percentiles(txns []Txn) map[string]float64 {
-	out := map[string]float64{}
-	if len(txns) == 0 {
-		return out
-	}
-	values := make([]float64, len(txns))
-	for i, t := range txns {
-		values[i] = t.LatencyMS
-	}
-	sort.Float64s(values)
-	pick := func(p float64) float64 {
-		idx := int(float64(len(values)) * p)
-		if idx >= len(values) {
-			idx = len(values) - 1
-		}
-		return values[idx]
-	}
-	out["p50"] = round3(pick(0.50))
-	out["p90"] = round3(pick(0.90))
-	out["p95"] = round3(pick(0.95))
-	out["p99"] = round3(pick(0.99))
-	out["p999"] = round3(pick(0.999))
-	out["max"] = round3(values[len(values)-1])
-	sum := 0.0
-	for _, v := range values {
-		sum += v
-	}
-	mean := sum / float64(len(values))
-	out["mean"] = round3(mean)
-	varsum := 0.0
-	for _, v := range values {
-		varsum += (v - mean) * (v - mean)
-	}
-	out["stddev"] = round3(math.Sqrt(varsum / float64(len(values))))
-	return out
+	return latency.Percentiles(samples(txns))
 }
 
 // Bucket is one progress window over the run.
@@ -208,37 +187,14 @@ type Bucket struct {
 // steady state, and any late degradation stay visible. An average over
 // the whole run hides all three.
 func Buckets(txns []Txn, width int64) []Bucket {
-	if len(txns) == 0 || width <= 0 {
-		return nil
-	}
-	byWindow := map[int64][]float64{}
-	var start int64 = math.MaxInt64
-	for _, t := range txns {
-		if t.Epoch < start {
-			start = t.Epoch
-		}
-	}
-	for _, t := range txns {
-		w := (t.Epoch - start) / width
-		byWindow[w] = append(byWindow[w], t.LatencyMS)
-	}
-	windows := make([]int64, 0, len(byWindow))
-	for w := range byWindow {
-		windows = append(windows, w)
-	}
-	sort.Slice(windows, func(i, j int) bool { return windows[i] < windows[j] })
 	var out []Bucket
-	for _, w := range windows {
-		vals := byWindow[w]
-		sort.Float64s(vals)
-		p50 := vals[len(vals)/2]
-		p99 := vals[min(len(vals)*99/100, len(vals)-1)]
+	for _, b := range latency.Buckets(samples(txns), width) {
 		out = append(out, Bucket{
-			Second: w * width,
-			Txns:   len(vals),
-			TPS:    round3(float64(len(vals)) / float64(width)),
-			P50:    round3(p50),
-			P99:    round3(p99),
+			Second: b.Second,
+			Txns:   b.Count,
+			TPS:    b.Rate,
+			P50:    b.P50,
+			P99:    b.P99,
 		})
 	}
 	return out
