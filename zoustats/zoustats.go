@@ -1,13 +1,14 @@
 // Package zoustats reads the store op counter file zou keeps when
-// ZOU_STORE_STATS is set, format 1 from crates/zou-store/src/stats.rs.
+// ZOU_STORE_STATS is set, format 2 from crates/zou-store/src/stats.rs.
 //
-// The file is 273 little endian u64 slots behind a magic and format
+// The file is little endian u64 slots behind a magic and format
 // header: count and bytes per op kind and key class, a power of two
-// microsecond latency histogram per op kind, io errors per kind, and
-// one CAS conflict counter. Counters accumulate for the life of one
-// zou boot, so the harness snapshots the file before and after a run
-// and works on the difference. Reading is a plain cold file read, it
-// never disturbs the live counters.
+// microsecond latency histogram per op kind, io errors per kind, one
+// CAS conflict counter, and per read tier the smgr call count, page
+// count, and call latency histogram. Counters accumulate for the life
+// of one zou boot, so the harness snapshots the file before and after
+// a run and works on the difference. Reading is a plain cold file
+// read, it never disturbs the live counters.
 package zoustats
 
 import (
@@ -18,18 +19,21 @@ import (
 )
 
 var opNames = [6]string{"get", "get_range", "put_if_match", "put", "delete", "list"}
-var classNames = [6]string{"manifest", "wal", "chk", "page", "file", "other"}
+var classNames = [7]string{"manifest", "wal", "chk", "shards", "page", "file", "other"}
+var tierNames = [3]string{"cache", "local", "store"}
 
 const (
 	kinds        = 6
-	classes      = 6
+	classes      = 7
+	tiers        = 3
 	buckets      = 32
 	header       = 2
 	bucketBase   = header + kinds*classes*2
 	errorBase    = bucketBase + kinds*buckets
 	conflictSlot = errorBase + kinds
-	slots        = conflictSlot + 1
-	format       = 1
+	tierBase     = conflictSlot + 1
+	slots        = tierBase + tiers*(2+buckets)
+	format       = 2
 )
 
 var magic = binary.LittleEndian.Uint64([]byte("ZOUSTATS"))
@@ -38,8 +42,9 @@ var magic = binary.LittleEndian.Uint64([]byte("ZOUSTATS"))
 type Counters [slots]uint64
 
 func countSlot(kind, class int) int { return header + (kind*classes+class)*2 }
+func tierSlot(tier int) int         { return tierBase + tier*(2+buckets) }
 
-// Read decodes a counter file, refusing anything that is not format 1.
+// Read decodes a counter file, refusing anything that is not format 2.
 func Read(path string) (Counters, error) {
 	var c Counters
 	raw, err := os.ReadFile(path)
@@ -107,7 +112,26 @@ func Report(c Counters) map[string]any {
 			"by_class": byClass,
 		}
 	}
-	return map[string]any{"ops": ops, "cas_conflicts": c[conflictSlot]}
+	reads := map[string]any{}
+	for tier, name := range tierNames {
+		calls := c[tierSlot(tier)]
+		if calls == 0 {
+			continue
+		}
+		hist := c[tierSlot(tier)+2 : tierSlot(tier)+2+buckets]
+		reads[name] = map[string]any{
+			"calls":  calls,
+			"pages":  c[tierSlot(tier)+1],
+			"p50_us": percentile(hist, calls, 0.50),
+			"p95_us": percentile(hist, calls, 0.95),
+			"p99_us": percentile(hist, calls, 0.99),
+		}
+	}
+	out := map[string]any{"ops": ops, "cas_conflicts": c[conflictSlot]}
+	if len(reads) > 0 {
+		out["reads"] = reads
+	}
+	return out
 }
 
 // Totals sums the counters into the op classes a price card bills:

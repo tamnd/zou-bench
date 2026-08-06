@@ -43,10 +43,20 @@ type Scenario struct {
 	// Requests is the rest workload. Each entry carries a name, a
 	// method, a path, which token to send, and a weight.
 	Requests []resthttp.Request `json:"requests"`
+	// Cycles, Query, and Port shape an attach scenario: how many
+	// stop and start rounds to measure, the query each round times
+	// from process spawn to first row, and the port the spawned
+	// server listens on.
+	Cycles int    `json:"cycles"`
+	Query  string `json:"query"`
+	Port   int    `json:"port"`
 }
 
 // IsREST reports whether the http driver owns this scenario.
 func (s Scenario) IsREST() bool { return s.Kind == "rest" }
+
+// IsAttach reports whether the attach driver owns this scenario.
+func (s Scenario) IsAttach() bool { return s.Kind == "attach" }
 
 // Load reads a scenario and returns it along with the raw document,
 // which goes into the result file verbatim so a result always carries
@@ -65,6 +75,17 @@ func Load(path string) (Scenario, map[string]any, error) {
 	}
 	if sc.IsREST() && len(sc.Requests) == 0 {
 		return Scenario{}, nil, fmt.Errorf("%s: a rest scenario needs requests", path)
+	}
+	if sc.IsAttach() {
+		if sc.Cycles == 0 {
+			sc.Cycles = 10
+		}
+		if sc.Query == "" {
+			sc.Query = "select 1"
+		}
+		if sc.Port == 0 {
+			sc.Port = 5432
+		}
 	}
 	if sc.Clients == 0 {
 		sc.Clients = 8

@@ -22,9 +22,14 @@ export PGBIN=/path/to/pg18/bin
 
 `run` executes one scenario against one server and writes a dated json result file.
 `rest` does the same over http against a REST api instead of over the wire protocol.
+`attach` measures cold attach: it spawns the postmaster itself, polls the socket every millisecond with a built in wire protocol client until one real query answers, and records connect, first row, and stop times per cycle. pg_ctl -w checks readiness ten times a second and psql pays process startup, both too coarse for a budget measured in hundreds of milliseconds, which is why the poll is our own.
 `report` merges result files into markdown tables grouped by scenario, one row per label.
 
-The server under test is started by you, not the harness, so each system's own startup procedure stays authoritative.
+```
+./zoubench attach scenarios/cold-attach.json --pgbin /path/to/pg18/bin --datadir /tmp/zou-data --zoustats /tmp/zou-runtime/store-stats --label zou-minio
+```
+
+The server under test is started by you, not the harness, except in `attach` where starting the server is the thing being measured.
 `scripts/` holds startup helpers for the local systems.
 
 ## What a run captures
@@ -41,7 +46,7 @@ From the server itself: version, non default settings, and before and after snap
 
 From the store when `--storedir` names the zou store path: bytes and object count before and after, the byte delta, and write amplification computed as store growth over wal bytes written.
 
-From zou's own op counters when `--zoustats` names the counter file `ZOU_STORE_STATS` pointed at (`zou dev` keeps it at `<runtime>/store-stats`): per op kind and key class counts and bytes, latency p50/p95/p99, io errors, and CAS conflicts, taken as the difference between snapshots at run start and end so only this run's traffic counts. When these are present the cost block prices measured op counts instead of saying unmeasured.
+From zou's own op counters when `--zoustats` names the counter file `ZOU_STORE_STATS` pointed at (`zou dev` keeps it at `<runtime>/store-stats`): per op kind and key class counts and bytes, latency p50/p95/p99, io errors, and CAS conflicts, taken as the difference between snapshots at run start and end so only this run's traffic counts. The same file carries the smgr read tier counters, calls, pages, and latency percentiles per tier, cache for local page cache hits, local for reconstruction that never left the process, store for reads that paid a store round trip, which is how a run shows its reads were served from cache instead of the store. When these are present the cost block prices measured op counts instead of saying unmeasured.
 
 From the price cards in `pricecards/` when `--pricecard` names one: storage dollars per month for the measured footprint, and op dollars only when op counts were actually measured, otherwise the field says unmeasured. Every card carries its source url and the date it was checked, and the self hosted cards amortize a real monthly box price over its disk.
 

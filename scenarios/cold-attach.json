@@ -1,0 +1,7 @@
+{
+  "name": "cold-attach",
+  "kind": "attach",
+  "cycles": 20,
+  "port": 5490,
+  "query": "select abalance from pgbench_accounts where aid = 1"
+}
