@@ -47,7 +47,7 @@ func TestReadRejectsForeignFiles(t *testing.T) {
 
 func TestDiffSubtractsAndCatchesRestarts(t *testing.T) {
 	before, err := Read(write(t, func(c *Counters) {
-		c[countSlot(3, 3)] = 100 // put, page class
+		c[countSlot(3, 3)] = 100 // put, shards class
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestReportAndSumSplitKindsAndClasses(t *testing.T) {
 		c[countSlot(0, 3)+1] = 9000 * 8192
 		c[countSlot(2, 1)] = 30 // put_if_match, wal
 		c[countSlot(2, 1)+1] = 30 * 1024
-		c[countSlot(3, 3)] = 6000 // put, page
+		c[countSlot(3, 3)] = 6000 // put, shards
 		c[countSlot(3, 3)+1] = 6000 * 8192
 		c[bucketBase+0*buckets+10] = 9000 // all gets in [1024us, 2048us)
 		c[conflictSlot] = 2
@@ -104,5 +104,38 @@ func TestReportAndSumSplitKindsAndClasses(t *testing.T) {
 	}
 	if !s.AnyTraffic {
 		t.Fatal("traffic not seen")
+	}
+}
+
+func TestReportCarriesReadTiers(t *testing.T) {
+	c, err := Read(write(t, func(c *Counters) {
+		c[tierSlot(0)] = 90     // cache calls
+		c[tierSlot(0)+1] = 400  // cache pages
+		c[tierSlot(0)+2+6] = 90 // all inside 128 us
+		c[tierSlot(2)] = 10
+		c[tierSlot(2)+1] = 10
+		c[tierSlot(2)+2+14] = 10 // 16 to 32 ms
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := Report(c)
+	reads, ok := report["reads"].(map[string]any)
+	if !ok {
+		t.Fatal("no reads block")
+	}
+	cache := reads["cache"].(map[string]any)
+	if cache["calls"].(uint64) != 90 || cache["pages"].(uint64) != 400 {
+		t.Fatalf("cache tier wrong: %v", cache)
+	}
+	if p50 := cache["p50_us"].(uint64); p50 != 128 {
+		t.Fatalf("cache p50 %d", p50)
+	}
+	store := reads["store"].(map[string]any)
+	if p50 := store["p50_us"].(uint64); p50 != 32768 {
+		t.Fatalf("store p50 %d", p50)
+	}
+	if _, there := reads["local"]; there {
+		t.Fatal("empty tier reported")
 	}
 }
