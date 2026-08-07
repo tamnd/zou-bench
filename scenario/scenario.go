@@ -50,6 +50,17 @@ type Scenario struct {
 	Cycles int    `json:"cycles"`
 	Query  string `json:"query"`
 	Port   int    `json:"port"`
+	// Segment, Drills, CheckpointSecs, and CompactSecs shape a
+	// sustain scenario: seconds of pgbench load per segment with one
+	// kill drill inside each, the rotation the drills fire in, and
+	// the cadences of the harness driven CHECKPOINT and compaction
+	// sweep. The cadences live in the scenario because nothing else
+	// drives folding or compaction on a zou dev node, so they are
+	// part of the workload shape, not tuning.
+	Segment        int      `json:"segment"`
+	Drills         []string `json:"drills"`
+	CheckpointSecs int      `json:"checkpoint_secs"`
+	CompactSecs    int      `json:"compact_secs"`
 }
 
 // IsREST reports whether the http driver owns this scenario.
@@ -57,6 +68,9 @@ func (s Scenario) IsREST() bool { return s.Kind == "rest" }
 
 // IsAttach reports whether the attach driver owns this scenario.
 func (s Scenario) IsAttach() bool { return s.Kind == "attach" }
+
+// IsSustain reports whether the soak driver owns this scenario.
+func (s Scenario) IsSustain() bool { return s.Kind == "sustain" }
 
 // Load reads a scenario and returns it along with the raw document,
 // which goes into the result file verbatim so a result always carries
@@ -85,6 +99,33 @@ func Load(path string) (Scenario, map[string]any, error) {
 		}
 		if sc.Port == 0 {
 			sc.Port = 5432
+		}
+	}
+	if sc.IsSustain() {
+		if sc.Segment == 0 {
+			sc.Segment = 600
+		}
+		if len(sc.Drills) == 0 {
+			sc.Drills = []string{"pusher", "crash", "death"}
+		}
+		// An unknown drill name is refused at load time rather than
+		// hours into a soak, when the rotation finally reaches it and
+		// the run so far is wasted.
+		for _, d := range sc.Drills {
+			switch d {
+			case "pusher", "crash", "death":
+			default:
+				return Scenario{}, nil, fmt.Errorf("%s: unknown drill %q", path, d)
+			}
+		}
+		if sc.CheckpointSecs == 0 {
+			sc.CheckpointSecs = 60
+		}
+		if sc.CompactSecs == 0 {
+			sc.CompactSecs = 120
+		}
+		if sc.Port == 0 {
+			sc.Port = 5497
 		}
 	}
 	if sc.Clients == 0 {

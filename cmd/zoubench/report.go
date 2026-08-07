@@ -31,17 +31,23 @@ func cmdReport(argv []string) {
 		return str(rows[i]["label"]) < str(rows[j]["label"])
 	})
 
+	// Sustain results answer different questions (recovery, drift,
+	// invariants) than a throughput run, so they get their own table
+	// instead of a row of mostly empty cells in the shared one.
+	var bench, soak []map[string]any
+	for _, r := range rows {
+		if c, ok := r["config"].(map[string]any); ok && str(c["kind"]) == "sustain" {
+			soak = append(soak, r)
+		} else {
+			bench = append(bench, r)
+		}
+	}
+
 	cols := []column{
 		// A simulated run wears the marker in every table it appears
 		// in, per the M1b rules: simulated numbers hold a place until
 		// a real bucket run replaces them, they never pass as real.
-		{"label", func(r map[string]any) string {
-			l := str(r["label"])
-			if r["simulated"] != nil {
-				l += " (sim)"
-			}
-			return l
-		}},
+		simLabelCol(),
 		{"tps", func(r map[string]any) string { return num(r["tps"]) }},
 		{"avg ms", func(r map[string]any) string { return num(r["latency_avg_ms"]) }},
 		{"p50", func(r map[string]any) string { return nested(r, "latency_ms", "p50") }},
@@ -55,15 +61,36 @@ func cmdReport(argv []string) {
 		{"store +MB", func(r map[string]any) string { return bytesToMB(nested(r, "store", "bytes_delta")) }},
 		{"w-amp", func(r map[string]any) string { return nested(r, "store", "write_amplification") }},
 		{"$/M txns", func(r map[string]any) string { return nested(r, "cost", "usd_per_million_txns") }},
-		{"date", func(r map[string]any) string {
-			d := str(r["date"])
-			if len(d) >= 10 {
-				return d[:10]
-			}
-			return d
-		}},
+		dateCol(),
 	}
 
+	printTables(bench, cols)
+
+	sustainCols := []column{
+		simLabelCol(),
+		{"hours", func(r map[string]any) string { return num(r["hours"]) }},
+		{"segs", func(r map[string]any) string { return alen(r["segments"]) }},
+		{"drills", func(r map[string]any) string { return alen(r["drills"]) }},
+		{"rto pusher p50/max", func(r map[string]any) string { return rtoCell(r, "pusher") }},
+		{"rto crash p50/max", func(r map[string]any) string { return rtoCell(r, "crash") }},
+		{"rto death p50/max", func(r map[string]any) string { return rtoCell(r, "death") }},
+		// The magnitude lives in the segments, the top level only says
+		// whether the bound held, so the worst sample is dug out here.
+		{"amp max", func(r map[string]any) string { return segMax(r, "amp_timeline", "amp_max") }},
+		{"amp ok", func(r map[string]any) string { return boolCell(r["amp_bound_held"]) }},
+		{"viol", func(r map[string]any) string { return num(r["violations"]) }},
+		{"tps mean", func(r map[string]any) string { return num(r["tps_mean"]) }},
+		// The worst segment's slope, because a leak is a slope that
+		// stays positive and an average across segments would let one
+		// good segment launder a bad one.
+		{"rss slope kb/min", func(r map[string]any) string { return segMax(r, "", "rss_slope_kb_per_min") }},
+		dateCol(),
+	}
+
+	printTables(soak, sustainCols)
+}
+
+func printTables(rows []map[string]any, cols []column) {
 	scenario := ""
 	for _, r := range rows {
 		if s := str(r["scenario"]); s != scenario {
@@ -85,6 +112,104 @@ func cmdReport(argv []string) {
 		}
 		fmt.Println()
 	}
+}
+
+func simLabelCol() column {
+	return column{"label", func(r map[string]any) string {
+		l := str(r["label"])
+		if r["simulated"] != nil {
+			l += " (sim)"
+		}
+		return l
+	}}
+}
+
+func dateCol() column {
+	return column{"date", func(r map[string]any) string {
+		d := str(r["date"])
+		if len(d) >= 10 {
+			return d[:10]
+		}
+		return d
+	}}
+}
+
+// alen renders the length of a json array cell, empty when absent so a
+// run that recorded nothing does not read as a run with zero of them.
+func alen(v any) string {
+	if a, ok := v.([]any); ok {
+		return fmt.Sprintf("%d", len(a))
+	}
+	return ""
+}
+
+// rtoCell renders one drill mode's recovery summary as p50/max, the
+// two ends a recovery target is usually written in.
+func rtoCell(r map[string]any, mode string) string {
+	m, ok := r["rto_ms"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	mm, ok := m[mode].(map[string]any)
+	if !ok {
+		return ""
+	}
+	p50, mx := num(mm["p50"]), num(mm["max"])
+	if p50 == "" && mx == "" {
+		return ""
+	}
+	return p50 + "/" + mx
+}
+
+func boolCell(v any) string {
+	if b, ok := v.(bool); ok {
+		if b {
+			return "yes"
+		}
+		return "no"
+	}
+	return ""
+}
+
+// segMax digs the maximum of a per segment value out of a sustain
+// result. With list empty it reads the key off each segment, with a
+// list name it reads the key off each entry of that list per segment.
+func segMax(r map[string]any, list, key string) string {
+	segs, ok := r["segments"].([]any)
+	if !ok {
+		return ""
+	}
+	best, found := 0.0, false
+	take := func(m map[string]any) {
+		if f, ok := m[key].(float64); ok {
+			if !found || f > best {
+				best, found = f, true
+			}
+		}
+	}
+	for _, s := range segs {
+		seg, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if list == "" {
+			take(seg)
+			continue
+		}
+		entries, ok := seg[list].([]any)
+		if !ok {
+			continue
+		}
+		for _, e := range entries {
+			if m, ok := e.(map[string]any); ok {
+				take(m)
+			}
+		}
+	}
+	if !found {
+		return ""
+	}
+	return num(best)
 }
 
 func str(v any) string {

@@ -1,0 +1,13 @@
+{
+  "name": "sustain-smoke",
+  "kind": "sustain",
+  "scale": 10,
+  "clients": 4,
+  "threads": 4,
+  "duration": 900,
+  "segment": 180,
+  "drills": ["pusher", "crash", "death"],
+  "checkpoint_secs": 30,
+  "compact_secs": 60,
+  "port": 5497
+}
