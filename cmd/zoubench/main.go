@@ -26,6 +26,8 @@ func main() {
 		cmdProbe(os.Args[2:])
 	case "attach":
 		cmdAttach(os.Args[2:])
+	case "sustain":
+		cmdSustain(os.Args[2:])
 	default:
 		usage()
 	}
@@ -35,6 +37,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage: zoubench run <scenario.json> --dsn <dsn> --label <label> [--datadir <dir>] [--storedir <path>] [--pricecard <name>] [--simulated <spec>] [--outdir <dir>]")
 	fmt.Fprintln(os.Stderr, "       zoubench rest <scenario.json> --url <base url> --label <label> [--jwt-secret <s>] [--dsn <dsn>] [--datadir <dir>] [--zoustats <path>] [--outdir <dir>]")
 	fmt.Fprintln(os.Stderr, "       zoubench attach <scenario.json> --pgbin <dir> --datadir <dir> --label <label> [--sockdir <dir>] [--zoustats <path>] [--outdir <dir>]")
+	fmt.Fprintln(os.Stderr, "       zoubench sustain <scenario.json> --pgbin <dir> --zoubin <path> --store <target> --workdir <dir> --label <label> [--outdir <dir>] [--simulated <spec>]")
 	fmt.Fprintln(os.Stderr, "       zoubench report <results...>")
 	fmt.Fprintln(os.Stderr, "       zoubench probe --endpoint <url> --bucket <bucket> --name <profile> [--region <r>] [--samples <n>] [--payload <bytes>]")
 	os.Exit(2)

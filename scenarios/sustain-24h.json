@@ -1,0 +1,13 @@
+{
+  "name": "sustain-24h",
+  "kind": "sustain",
+  "scale": 1000,
+  "clients": 8,
+  "threads": 8,
+  "duration": 86400,
+  "segment": 1800,
+  "drills": ["pusher", "crash", "death"],
+  "checkpoint_secs": 60,
+  "compact_secs": 120,
+  "port": 5497
+}
