@@ -21,11 +21,14 @@ type Conn struct {
 }
 
 // Dial connects and completes the startup handshake. Addr is a unix
-// socket path like /tmp/.s.PGSQL.5432 or a host:port pair. The server
-// must trust the connection, any authentication request is an error.
+// socket path like /tmp/.s.PGSQL.5432 or a host:port pair. A path
+// separator is what tells them apart, either kind, because on Windows
+// a socket path starts with a drive letter rather than a slash. The
+// server must trust the connection, any authentication request is an
+// error.
 func Dial(addr, user, database string) (*Conn, error) {
 	network := "tcp"
-	if strings.HasPrefix(addr, "/") {
+	if strings.ContainsAny(addr, `/\`) {
 		network = "unix"
 	}
 	c, err := net.Dial(network, addr)
