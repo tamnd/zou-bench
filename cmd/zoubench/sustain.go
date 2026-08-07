@@ -139,10 +139,7 @@ func cmdSustain(argv []string) {
 	stopLedger := make(chan struct{})
 	go ledgerWriter(addr, pguser, led, stopLedger)
 
-	nSeg := sc.Duration / sc.Segment
-	if nSeg < 1 {
-		nSeg = 1
-	}
+	nSeg := max(sc.Duration/sc.Segment, 1)
 	// The balance identity only exists for the tpcb builtin, whose
 	// history table records every delta the balances absorbed.
 	tpcb := sc.Builtin == "" || sc.Builtin == "tpcb-like"
@@ -215,7 +212,7 @@ func cmdSustain(argv []string) {
 		switch mode {
 		case "pusher":
 			var pid int
-			pid, killErr = pusherPid()
+			pid, killErr = pusherPid(filepath.Join(dev.runtime, "pgdata"))
 			if killErr == nil {
 				killErr = sigkill(pid)
 			}
@@ -392,25 +389,36 @@ func (d *devNode) killNode() {
 }
 
 // pusherPid finds the postgres background worker running the v2 WAL
-// sequencer by its process title. The pid is looked up at kill time,
-// never cached, because the worker restarts with the postmaster and a
-// cached pid could kill an innocent process that reused it.
-func pusherPid() (int, error) {
-	out, err := exec.Command("ps", "-ax", "-o", "pid=,command=").Output()
+// sequencer by its process title, and only among the children of the
+// harness's own postmaster. The machine may run other zou instances
+// with pushers of their own, and a title-only match would hand the
+// drill an innocent victim. The pid is looked up at kill time, never
+// cached, because the worker restarts with the postmaster and a
+// cached pid could kill an unrelated process that reused it.
+func pusherPid(pgdata string) (int, error) {
+	postmaster, err := serverPid(pgdata)
 	if err != nil {
 		return 0, err
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+	out, err := exec.Command("ps", "-ax", "-o", "pid=,ppid=,command=").Output()
+	if err != nil {
+		return 0, err
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if !strings.Contains(line, "zou wal pusher") {
 			continue
 		}
 		f := strings.Fields(strings.TrimSpace(line))
-		if len(f) < 2 {
+		if len(f) < 3 {
+			continue
+		}
+		ppid, err := strconv.Atoi(f[1])
+		if err != nil || ppid != postmaster {
 			continue
 		}
 		return strconv.Atoi(f[0])
 	}
-	return 0, fmt.Errorf("no process titled \"zou wal pusher\"")
+	return 0, fmt.Errorf("no \"zou wal pusher\" under postmaster %d", postmaster)
 }
 
 // reapSHM removes this user's SysV shared memory segments that have
@@ -438,7 +446,7 @@ func reapSHM() {
 	if err != nil {
 		return
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		f := strings.Fields(line)
 		if len(f) <= attachCol {
 			continue
@@ -483,7 +491,7 @@ func waitWrite(addr, user, sql string, from, deadline time.Time) (float64, bool)
 // read as data loss; only a stable wrong answer counts.
 func soakQuery(addr, user, sql string) (string, error) {
 	var last error
-	for attempt := 0; attempt < 5; attempt++ {
+	for attempt := range 5 {
 		if attempt > 0 {
 			time.Sleep(2 * time.Second)
 		}
