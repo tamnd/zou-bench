@@ -220,6 +220,16 @@ func cmdFleet(argv []string) {
 		fmt.Printf("%s: %d requests, %d errors, p50 %.1f ms, p99 %.1f ms\n",
 			name, out.Requests, out.Errors,
 			latency.Percentiles(out.Samples)["p50"], latency.Percentiles(out.Samples)["p99"])
+		// A phase that answered wrongly is not a slow phase, and the
+		// status it answered with is the whole diagnosis, so it goes to
+		// the terminal rather than only into a file nobody opens until
+		// the run is over.
+		if out.Errors > 0 {
+			fmt.Printf("%s: status %v\n", name, out.Status)
+			for _, f := range out.Failures {
+				fmt.Printf("%s: %s\n", name, f)
+			}
+		}
 		result[name] = block
 	}
 
@@ -264,10 +274,50 @@ func cmdFleet(argv []string) {
 	die(os.MkdirAll(*outdir, 0o755))
 	stamp := strings.NewReplacer(":", "", "-", "").Replace(result["date"].(string))[:15]
 	path := filepath.Join(*outdir, fmt.Sprintf("%s-%s-%s.json", sc.Name, *label, stamp))
-	out, err := json.MarshalIndent(result, "", "  ")
+	var bad []string
+	clean := jsonable(result, "", &bad)
+	if len(bad) > 0 {
+		fmt.Printf("zoubench: not a number, written as null: %s\n", strings.Join(bad, ", "))
+	}
+	out, err := json.MarshalIndent(clean, "", "  ")
 	die(err)
 	die(os.WriteFile(path, out, 0o644))
 	fmt.Println(path)
+}
+
+// jsonable makes a result writable when one number in it is not.
+//
+// An infinity or a NaN, which is what a rate over a window of no time
+// comes to, makes encoding/json refuse the whole document, so a run
+// that took an hour is lost to one division. This walks the result,
+// writes the offending leaf as null, and returns the paths so the run
+// says which number it was rather than leaving it to be guessed at.
+func jsonable(v any, path string, bad *[]string) any {
+	if _, err := json.Marshal(v); err == nil {
+		return v
+	}
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = jsonable(val, path+"/"+k, bad)
+		}
+		return out
+	case map[string]float64:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = jsonable(val, path+"/"+k, bad)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = jsonable(val, fmt.Sprintf("%s/%d", path, i), bad)
+		}
+		return out
+	}
+	*bad = append(*bad, strings.TrimPrefix(path, "/"))
+	return nil
 }
 
 type serveArgs struct {
