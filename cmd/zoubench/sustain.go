@@ -58,9 +58,13 @@ func cmdSustain(argv []string) {
 	if runtime.GOOS == "windows" {
 		die(fmt.Errorf("sustain drills kill processes with unix signals, this command does not run on windows"))
 	}
-	u, err := user.Current()
-	die(err)
-	pguser := u.Username
+	// The cluster superuser zou dev initdb's with, by that project's
+	// design: the owner of a database does not depend on which account
+	// started the process. Connecting as the OS user only ever worked
+	// on stores where someone had created that role by hand, and a
+	// fresh store spent the whole readiness window on "role does not
+	// exist" before dying.
+	pguser := "postgres"
 
 	die(os.MkdirAll(*workdir, 0o755))
 	// One counter file for the whole soak. The counters reset with
@@ -69,7 +73,7 @@ func cmdSustain(argv []string) {
 	// landed in, rather than juggling one file per boot.
 	statsPath := filepath.Join(*workdir, "store-stats")
 	addr := "127.0.0.1:" + strconv.Itoa(sc.Port)
-	connArgs := []string{"-h", "127.0.0.1", "-p", strconv.Itoa(sc.Port), "postgres"}
+	connArgs := []string{"-h", "127.0.0.1", "-p", strconv.Itoa(sc.Port), "-U", pguser, "postgres"}
 
 	result := map[string]any{
 		"scenario": sc.Name,
