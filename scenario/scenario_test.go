@@ -67,6 +67,48 @@ func TestSustainRejectsAnUnknownDrill(t *testing.T) {
 	}
 }
 
+func TestFleetDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.json")
+	body := `{"name":"x","kind":"fleet","requests":[{"name":"r","path":"/t"}]}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sc, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sc.IsFleet() {
+		t.Fatal("kind fleet did not answer IsFleet")
+	}
+	if sc.Tenants != 1000 || sc.WorkingSet != 100 || sc.MaxAttached != 100 || sc.IdleSecs != 300 {
+		t.Fatalf("defaults = %+v", sc)
+	}
+}
+
+func TestFleetRefusesAWorkingSetLargerThanTheFleet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.json")
+	body := `{"name":"x","kind":"fleet","tenants":10,"working_set":50,"requests":[{"name":"r","path":"/t"}]}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(path); err == nil {
+		t.Fatal("expected an error for a working set larger than the fleet")
+	}
+}
+
+func TestFleetNeedsRequests(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.json")
+	if err := os.WriteFile(path, []byte(`{"name":"x","kind":"fleet"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(path); err == nil {
+		t.Fatal("expected an error for a fleet scenario with no requests")
+	}
+}
+
 func TestEveryCheckedInScenarioLoads(t *testing.T) {
 	entries, err := os.ReadDir("../scenarios")
 	if err != nil {

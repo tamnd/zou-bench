@@ -100,12 +100,46 @@ Cost simulation rides on the stamp: a run simulated as `s3-standard` prices its 
 The op counts are real, only the latency was simulated, and an explicit `--pricecard` still wins.
 When op counts and transactions were both measured, the cost block adds `usd_per_million_txns`, the request dollars per million transactions, which the report shows as `$/M txns`.
 
+## Fleet runs
+
+`zoubench fleet` measures a node holding many projects instead of one project answering fast.
+
+```
+./zoubench fleet scenarios/fleet-1000.json \
+    --zoubin /path/to/zou --pgbin /path/to/pg18/bin \
+    --store /srv/fleet-store --workdir /srv/fleet-run \
+    --cpus 0-7 --label zou-fleet
+```
+
+The node is started by the harness, unlike `run` and `rest`, because half of what is measured is what the node does when nobody asked it to: the attach a request triggers, the eviction at the ceiling, and the memory the whole process tree settles at.
+`--cpus` pins it with taskset, which is how a box with more cores than the node is supposed to have still measures that node: the harness and the traffic it generates must not be sharing the cores the answer is about.
+
+Three phases, chosen with `--phases`.
+`provision` registers every ref, applies the scenario's `setup` sql over the postgres door, which is the step that runs initdb and captures the genesis, and sends one http request, which is what applies the tenant contract the api needs.
+`steady` draws requests from a working set the node's ceiling can hold, so nothing is evicted and the answer is what a packed node costs when the projects being used fit.
+`churn` draws from every tenant, so with a ceiling below the fleet size the node attaches and evicts for the whole window, and the gap between the two phases' tails is the number a fleet is sized on.
+
+Provisioning a thousand tenants is a thousand initdbs, so it is written down as it goes.
+`<workdir>/fleet-state.json` names every ref that has a database, a table and rows, and a second run against the same store skips them, which is what makes a fleet run resumable and lets a measuring phase be repeated with a different ceiling for free.
+A state file that names a different store, or one written with a different jwt secret, is refused rather than trusted.
+
+Every tenant in a fleet is created with the same jwt secret, so token minting stays off the request path.
+Each still has its own registry entry, its own database and its own prefix, and HS256 verification costs the same whatever the key is, so nothing measured changes.
+
+A fleet result carries both sides of the story: what the client waited for, as percentiles and 30 second buckets per phase, and what the node says it was doing, read off its ops port as attach counts, the attach latency histogram, registry cache hits and misses, and the attached gauge.
+The process tree sampler gives RSS peak, median, timeline and slope across every postmaster the node started, which is the memory ceiling claim, and the runtime directory footprint is measured at the end of each phase, which is the disk one.
+
+Fleet scenario fields on top of the shared ones: `tenants`, `working_set`, `max_attached`, `idle_secs`, `shared_buffers`, and `setup`.
+The node's budgets live in the scenario because they are the shape of the deployment being measured rather than tuning: a ceiling below the fleet size is what makes the churn phase churn.
+
 ## Scenarios
 
 - `tpcb-scale100`: pgbench tpcb-like, scale 100, 8 clients, 60 s, with data load.
 - `select-scale100`: pgbench select-only on the loaded scale 100 data.
 - `tpcb-scale1000`: scale 1000, dataset larger than RAM on most boxes, 32 clients, 5 min.
 - `rest-warm-reads`: the REST read mix a small app makes, 8 clients, 60 s, against the tenant `rest-demo.sql` builds.
+- `fleet-1000`: a thousand small projects on one node with a hundred attached at once, a steady phase over a working set that fits and a churn phase over all thousand.
+- `fleet-smoke`: the same shape at ten tenants, for checking the harness works before spending half an hour on initdb.
 
 Scenario files are plain json, add one per workload and keep them small and explicit.
 Fields: name, init, scale, clients, threads, duration, warmup, builtin, script, rate.

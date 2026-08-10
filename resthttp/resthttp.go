@@ -240,10 +240,10 @@ func once(ctx context.Context, client *http.Client, o Options, r Request, rng *r
 	if method == "" {
 		method = http.MethodGet
 	}
-	path := expand(r.Path, rng)
+	path := Expand(r.Path, rng)
 	var body io.Reader
 	if r.Body != "" {
-		body = strings.NewReader(expand(r.Body, rng))
+		body = strings.NewReader(Expand(r.Body, rng))
 	}
 	req, err := http.NewRequestWithContext(ctx, method, o.BaseURL+path, body)
 	if err != nil {
@@ -275,10 +275,10 @@ func once(ctx context.Context, client *http.Client, o Options, r Request, rng *r
 	return float64(time.Since(t0).Nanoseconds()) / 1e6, res.StatusCode, n, nil
 }
 
-// expand fills the two placeholders a workload needs: a random integer
+// Expand fills the two placeholders a workload needs: a random integer
 // in a range, for asking about a different row every time, and a random
 // hex string, for writes that need to be unique.
-func expand(s string, rng *rand.Rand) string {
+func Expand(s string, rng *rand.Rand) string {
 	for {
 		i := strings.Index(s, "{{rand:")
 		if i < 0 {

@@ -67,6 +67,17 @@ type Scenario struct {
 	// scenario exists to measure the hours after the load, not the
 	// load itself.
 	ServerSideInit bool `json:"server_side_init"`
+	// Tenants, WorkingSet, MaxAttached, IdleSecs and SharedBuffers
+	// shape a fleet scenario: how many projects the store holds, how
+	// many of them the steady phase draws from, and the node's own
+	// budgets. The budgets live in the scenario because they are the
+	// shape of the deployment being measured, not tuning: a ceiling
+	// below the fleet size is what makes the churn phase churn.
+	Tenants       int    `json:"tenants"`
+	WorkingSet    int    `json:"working_set"`
+	MaxAttached   int    `json:"max_attached"`
+	IdleSecs      int    `json:"idle_secs"`
+	SharedBuffers string `json:"shared_buffers"`
 }
 
 // IsREST reports whether the http driver owns this scenario.
@@ -77,6 +88,9 @@ func (s Scenario) IsAttach() bool { return s.Kind == "attach" }
 
 // IsSustain reports whether the soak driver owns this scenario.
 func (s Scenario) IsSustain() bool { return s.Kind == "sustain" }
+
+// IsFleet reports whether the many tenant driver owns this scenario.
+func (s Scenario) IsFleet() bool { return s.Kind == "fleet" }
 
 // Load reads a scenario and returns it along with the raw document,
 // which goes into the result file verbatim so a result always carries
@@ -105,6 +119,28 @@ func Load(path string) (Scenario, map[string]any, error) {
 		}
 		if sc.Port == 0 {
 			sc.Port = 5432
+		}
+	}
+	if sc.IsFleet() {
+		if len(sc.Requests) == 0 {
+			return Scenario{}, nil, fmt.Errorf("%s: a fleet scenario needs requests", path)
+		}
+		if sc.Tenants == 0 {
+			sc.Tenants = 1000
+		}
+		if sc.WorkingSet == 0 {
+			sc.WorkingSet = sc.Tenants / 10
+		}
+		if sc.MaxAttached == 0 {
+			sc.MaxAttached = 100
+		}
+		if sc.IdleSecs == 0 {
+			sc.IdleSecs = 300
+		}
+		// A working set larger than the fleet is a scenario that
+		// cannot do what it says, and the time to say so is at load.
+		if sc.WorkingSet > sc.Tenants {
+			return Scenario{}, nil, fmt.Errorf("%s: working_set %d is larger than tenants %d", path, sc.WorkingSet, sc.Tenants)
 		}
 	}
 	if sc.IsSustain() {
