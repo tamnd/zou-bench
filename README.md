@@ -119,6 +119,9 @@ Three phases, chosen with `--phases`.
 `steady` draws requests from a working set the node's ceiling can hold, so nothing is evicted and the answer is what a packed node costs when the projects being used fit.
 `churn` draws from every tenant, so with a ceiling below the fleet size the node attaches and evicts for the whole window, and the gap between the two phases' tails is the number a fleet is sized on.
 
+A steady phase only measures a packed node if its warmup outlasts attaching the whole working set, which at 16 clients and a several second attach is minutes rather than seconds.
+Size `warmup` at working set times attach divided by clients and then some, or the measured window reports the attach storm instead of the node, and the difference between the two is three orders of magnitude at the tail.
+
 Provisioning a thousand tenants is a thousand initdbs, so it is written down as it goes.
 `<workdir>/fleet-state.json` names every ref that has a database, a table and rows, and a second run against the same store skips them, which is what makes a fleet run resumable and lets a measuring phase be repeated with a different ceiling for free.
 A state file that names a different store, or one written with a different jwt secret, is refused rather than trusted.
@@ -139,6 +142,7 @@ The node's budgets live in the scenario because they are the shape of the deploy
 - `tpcb-scale1000`: scale 1000, dataset larger than RAM on most boxes, 32 clients, 5 min.
 - `rest-warm-reads`: the REST read mix a small app makes, 8 clients, 60 s, against the tenant `rest-demo.sql` builds.
 - `fleet-1000`: a thousand small projects on one node with a hundred attached at once, a steady phase over a working set that fits and a churn phase over all thousand.
+- `fleet-1000-warm`: the same thousand tenants with a ten minute warmup, long enough that the working set is attached before the measured window opens.
 - `fleet-smoke`: the same shape at ten tenants, for checking the harness works before spending half an hour on initdb.
 
 Scenario files are plain json, add one per workload and keep them small and explicit.
