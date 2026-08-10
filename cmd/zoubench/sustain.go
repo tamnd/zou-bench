@@ -216,7 +216,7 @@ func cmdSustain(argv []string) {
 		switch mode {
 		case "pusher":
 			var pid int
-			pid, killErr = pusherPid(filepath.Join(dev.runtime, "pgdata"))
+			pid, killErr = waitPusherPid(filepath.Join(dev.runtime, "pgdata"), 2*time.Minute)
 			if killErr == nil {
 				killErr = sigkill(pid)
 			}
@@ -423,6 +423,25 @@ func pusherPid(pgdata string) (int, error) {
 		return strconv.Atoi(f[0])
 	}
 	return 0, fmt.Errorf("no \"zou wal pusher\" under postmaster %d", postmaster)
+}
+
+// waitPusherPid retries the lookup for a while before giving up. At
+// large scales crash recovery from the previous drill can still be
+// running when this one fires, and background workers only start
+// once recovery ends, so an instant lookup skips the drill on
+// exactly the runs where killing the pusher is most interesting.
+// Killing it right after recovery is a legitimate landing point; a
+// worker that still is not up after the wait is a real finding and
+// stays an error.
+func waitPusherPid(pgdata string, patience time.Duration) (int, error) {
+	deadline := time.Now().Add(patience)
+	for {
+		pid, err := pusherPid(pgdata)
+		if err == nil || time.Now().After(deadline) {
+			return pid, err
+		}
+		time.Sleep(time.Second)
+	}
 }
 
 // reapSHM removes this user's SysV shared memory segments that have
