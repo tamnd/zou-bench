@@ -3,6 +3,7 @@ package fleet
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -97,9 +98,12 @@ func Buckets(m Metrics, name string) []Bucket {
 			continue
 		}
 		le, err := strconv.ParseFloat(rest[:end], 64)
-		if err != nil {
-			// +Inf is the last bucket and its count is the total,
-			// which _count already carries.
+		// +Inf is the last bucket and its count is the total, which
+		// _count already carries. ParseFloat reads "+Inf" as a number
+		// rather than refusing it, so the bound has to be checked and
+		// not just the error, and an infinity that reaches a result
+		// file is a document encoding/json will not write at all.
+		if err != nil || math.IsInf(le, 0) || math.IsNaN(le) {
 			continue
 		}
 		out = append(out, Bucket{LE: le, Count: v})

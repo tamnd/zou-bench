@@ -178,7 +178,7 @@ func drive(ctx context.Context, client *http.Client, o Options, picks []resthttp
 				// pressure on the attach path, which is what this
 				// measures.
 				ref := o.Refs[rng.IntN(len(o.Refs))]
-				ms, status, n, err := once(ctx, client, o, tokens, ref, req, rng)
+				ms, status, n, said, err := once(ctx, client, o, tokens, ref, req, rng)
 				if ctx.Err() != nil {
 					return
 				}
@@ -201,7 +201,7 @@ func drive(ctx context.Context, client *http.Client, o Options, picks []resthttp
 					l.errors++
 					if len(l.failures) < 5 {
 						l.failures = append(l.failures,
-							fmt.Sprintf("%s %s: wanted %d, got %d", ref, req.Name, want, status))
+							fmt.Sprintf("%s %s: wanted %d, got %d: %s", ref, req.Name, want, status, said))
 					}
 					continue
 				}
@@ -253,7 +253,10 @@ func drive(ctx context.Context, client *http.Client, o Options, picks []resthttp
 	return out, nil
 }
 
-func once(ctx context.Context, client *http.Client, o Options, tokens map[string]string, ref string, r resthttp.Request, rng *rand.Rand) (float64, int, int64, error) {
+// once sends one request. It returns what the server said as well as
+// how long it took, because a status nobody expected is a bug report
+// and the body is the half of it that says what went wrong.
+func once(ctx context.Context, client *http.Client, o Options, tokens map[string]string, ref string, r resthttp.Request, rng *rand.Rand) (float64, int, int64, string, error) {
 	method := r.Method
 	if method == "" {
 		method = http.MethodGet
@@ -265,7 +268,7 @@ func once(ctx context.Context, client *http.Client, o Options, tokens map[string
 	}
 	req, err := http.NewRequestWithContext(ctx, method, URL(o.BaseURL, ref, o.APIPrefix, path), body)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, "", err
 	}
 	auth := r.Auth
 	if auth == "" {
@@ -281,14 +284,28 @@ func once(ctx context.Context, client *http.Client, o Options, tokens map[string
 	for k, v := range r.Header {
 		req.Header.Set(k, v)
 	}
+	want := r.Expect
+	if want == 0 {
+		want = http.StatusOK
+	}
 	t0 := time.Now()
 	res, err := client.Do(req)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, "", err
 	}
-	n, _ := io.Copy(io.Discard, res.Body)
+	var said string
+	var n int64
+	if res.StatusCode == want {
+		n, _ = io.Copy(io.Discard, res.Body)
+	} else {
+		// Only read on the unexpected path: reading every body into
+		// memory would measure the harness and not the server.
+		raw, _ := io.ReadAll(io.LimitReader(res.Body, 400))
+		n = int64(len(raw))
+		said = strings.TrimSpace(string(raw))
+	}
 	res.Body.Close()
-	return float64(time.Since(t0).Nanoseconds()) / 1e6, res.StatusCode, n, nil
+	return float64(time.Since(t0).Nanoseconds()) / 1e6, res.StatusCode, n, said, nil
 }
 
 func weighted(reqs []resthttp.Request) []resthttp.Request {

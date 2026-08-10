@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -101,6 +102,7 @@ zou_tenant_attaches_total{outcome="ok"} 100
 zou_tenant_attach_seconds_bucket{le="0.1"} 10
 zou_tenant_attach_seconds_bucket{le="1"} 80
 zou_tenant_attach_seconds_bucket{le="10"} 100
+zou_tenant_attach_seconds_bucket{le="+Inf"} 100
 zou_tenant_attach_seconds_sum 55.5
 zou_tenant_attach_seconds_count 100
 `
@@ -122,9 +124,16 @@ zou_tenant_attach_seconds_count 100
 	if !ok || mean < 0.554 || mean > 0.556 {
 		t.Fatalf("mean = %v %v", mean, ok)
 	}
+	// The +Inf bucket is left out on purpose: _count already carries
+	// its number and an infinity is not something json can write.
 	buckets := Buckets(m, "zou_tenant_attach_seconds")
 	if len(buckets) != 3 || buckets[0].LE != 0.1 || buckets[2].LE != 10 {
 		t.Fatalf("buckets = %v", buckets)
+	}
+	if raw, err := json.Marshal(buckets); err != nil {
+		t.Fatalf("buckets are not writable: %v", err)
+	} else if strings.Contains(string(raw), "Inf") {
+		t.Fatalf("an infinity reached the result file: %s", raw)
 	}
 	p50, _ := Quantile(buckets, 0.50)
 	if p50 != 1 {
