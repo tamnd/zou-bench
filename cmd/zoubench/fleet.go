@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -520,7 +521,11 @@ func touch(client *http.Client, base, ref, secret string) error {
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("first request answered %s", res.Status)
+		// The body is where the node says what actually went wrong, and a
+		// provisioning failure that only carries a status number is a
+		// second run to find out what the first one already knew.
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 400))
+		return fmt.Errorf("first request answered %s: %s", res.Status, strings.TrimSpace(string(body)))
 	}
 	return nil
 }
