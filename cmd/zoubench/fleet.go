@@ -439,10 +439,13 @@ func applySetup(a provisionArgs, ref string) error {
 	if a.setup == "" {
 		return nil
 	}
-	dsn := fmt.Sprintf("host=127.0.0.1 port=%d user=service_role.%s dbname=postgres", a.pgPort, ref)
+	// As postgres and not as service_role, because the schema is the
+	// project's own DDL and service_role owns nothing, the same split a
+	// Supabase project has between its migrations and its api.
+	dsn := fmt.Sprintf("host=127.0.0.1 port=%d user=postgres.%s dbname=postgres", a.pgPort, ref)
 	cmd := exec.Command(pgbench.Tool("psql"),
 		append([]string{"-v", "ON_ERROR_STOP=1", "-q", "-f", a.setup}, pgbench.DSNArgs(dsn)...)...)
-	cmd.Env = append(os.Environ(), "PGPASSWORD="+resthttp.KeyToken(a.secret, "service_role"))
+	cmd.Env = append(os.Environ(), "PGPASSWORD="+resthttp.KeyToken(a.secret, "postgres"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("setup: %s", strings.TrimSpace(string(out)))
 	}
