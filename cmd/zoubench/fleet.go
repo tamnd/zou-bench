@@ -340,11 +340,13 @@ type provisionArgs struct {
 }
 
 // provision makes the tenants that are not there yet. Three steps per
-// tenant: register the ref, which writes one small object and starts
-// nothing; apply the schema over the postgres door, which is the step
-// that runs initdb and captures the genesis, so it is the cold create
-// and it is timed; and one http request, which is what applies the
-// tenant contract the api needs and is therefore its own first touch.
+// tenant, and the order between the last two is not free: register the
+// ref, which writes one small object and starts nothing; then one http
+// request, which is what runs initdb, captures the genesis and applies
+// the tenant contract, so it is the cold create and it is timed; and
+// only then the schema over the postgres door, because the postgres
+// door logs in as service_role and that role is one the contract
+// creates.
 func provision(a provisionArgs) (map[string]any, error) {
 	if a.jobs <= 0 {
 		a.jobs = 8
@@ -368,22 +370,20 @@ func provision(a provisionArgs) (map[string]any, error) {
 			client := &http.Client{Timeout: 120 * time.Second}
 			for ref := range work {
 				t0 := time.Now()
-				if err := makeTenant(a, ref); err != nil {
-					mu.Lock()
-					if len(failed) < 5 {
-						failed = append(failed, ref+": "+err.Error())
-					}
-					mu.Unlock()
-					continue
-				}
+				err := register(a, ref)
 				created := msSince(t0)
 				t1 := time.Now()
-				err := touch(client, a.base, ref, a.secret)
+				if err == nil {
+					err = touch(client, a.base, ref, a.secret)
+				}
 				touched := msSince(t1)
+				if err == nil {
+					err = applySetup(a, ref)
+				}
 				mu.Lock()
 				if err != nil {
 					if len(failed) < 5 {
-						failed = append(failed, ref+" first http: "+err.Error())
+						failed = append(failed, ref+": "+err.Error())
 					}
 				} else {
 					createMS = append(createMS, created)
@@ -422,13 +422,20 @@ func provision(a provisionArgs) (map[string]any, error) {
 	return out, nil
 }
 
-// makeTenant registers a ref and applies the schema, which is the point
-// at which a registered project becomes a database.
-func makeTenant(a provisionArgs, ref string) error {
+// register writes the ref into the registry, which costs one small
+// object and starts no database.
+func register(a provisionArgs, ref string) error {
 	out, err := exec.Command(a.zoubin, "tenant", a.store, "create", ref, "--secret", a.secret).CombinedOutput()
 	if err != nil && !strings.Contains(string(out), "already") {
 		return fmt.Errorf("tenant create: %s", strings.TrimSpace(string(out)))
 	}
+	return nil
+}
+
+// applySetup puts the project's own schema in over the postgres door,
+// which is the point at which a registered project becomes a project
+// with something in it.
+func applySetup(a provisionArgs, ref string) error {
 	if a.setup == "" {
 		return nil
 	}
@@ -444,9 +451,10 @@ func makeTenant(a provisionArgs, ref string) error {
 
 // touch sends the one request that makes the api side of a tenant real,
 // which is where the tenant contract, the roles and the auth helpers
-// are applied.
+// are applied. It asks for the root document rather than for a table,
+// because at this point the project has no tables.
 func touch(client *http.Client, base, ref, secret string) error {
-	url := fleet.URL(base, ref, "/rest/v1", "/bench_rows?select=id&limit=1")
+	url := fleet.URL(base, ref, "/rest/v1", "/")
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
