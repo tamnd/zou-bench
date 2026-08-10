@@ -61,6 +61,12 @@ type Scenario struct {
 	Drills         []string `json:"drills"`
 	CheckpointSecs int      `json:"checkpoint_secs"`
 	CompactSecs    int      `json:"compact_secs"`
+	// ServerSideInit generates pgbench rows inside the server instead
+	// of streaming them from the client. Same data, but a big scale
+	// initializes in a fraction of the time, which matters when the
+	// scenario exists to measure the hours after the load, not the
+	// load itself.
+	ServerSideInit bool `json:"server_side_init"`
 }
 
 // IsREST reports whether the http driver owns this scenario.

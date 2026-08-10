@@ -1,11 +1,11 @@
 {
-  "name": "sustain-24h",
+  "name": "sustain-6h",
   "kind": "sustain",
-  "scale": 1000,
-  "clients": 8,
-  "threads": 8,
-  "duration": 86400,
-  "segment": 1800,
+  "scale": 100,
+  "clients": 6,
+  "threads": 6,
+  "duration": 21600,
+  "segment": 900,
   "drills": [
     "pusher",
     "crash",

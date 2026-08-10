@@ -127,8 +127,12 @@ func cmdSustain(argv []string) {
 	_, err = soakQuery(addr, pguser, "checkpoint")
 	dieDown(err)
 	tInit := time.Now()
+	initArgs := []string{"-i", "-q", "-s", strconv.Itoa(sc.Scale)}
+	if sc.ServerSideInit {
+		initArgs = []string{"-i", "-I", "dtGvp", "-s", strconv.Itoa(sc.Scale)}
+	}
 	init := exec.Command(filepath.Join(*pgbin, "pgbench"),
-		append([]string{"-i", "-q", "-s", strconv.Itoa(sc.Scale)}, connArgs...)...)
+		append(initArgs, connArgs...)...)
 	init.Stdout, init.Stderr = os.Stderr, os.Stderr
 	dieDown(init.Run())
 	result["init_seconds"] = round1(time.Since(tInit).Seconds())
