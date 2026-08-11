@@ -65,6 +65,25 @@ func TestARestartedCounterDropsItsIntervalRatherThanGoingNegative(t *testing.T) 
 	}
 }
 
+// The settle is the flush the phase before left behind, and a rate taken
+// through it is that phase's number rather than a sleeping project's.
+func TestASettleLeavesTheLoadsOwnFlushOutOfTheRate(t *testing.T) {
+	samples := []Sample{
+		{Elapsed: 0, Attached: 1, Puts: 0},
+		{Elapsed: 60, Attached: 1, Puts: 5000},
+		{Elapsed: 120, Attached: 1, Puts: 5001},
+		{Elapsed: 180, Attached: 1, Puts: 5002},
+	}
+	kept := After(samples, 120)
+	if len(kept) != 2 || kept[0].Elapsed != 120 {
+		t.Fatalf("kept %+v", kept)
+	}
+	// One put a minute rather than the five thousand the load left.
+	if got := Rates(kept).AttachedPerProjectHour.Puts; got != 60 {
+		t.Fatalf("puts per project hour = %v", got)
+	}
+}
+
 func TestOneSampleIsNoRateAtAll(t *testing.T) {
 	got := Rates([]Sample{{Elapsed: 0, Attached: 3}})
 	if got.SawDormant || got.AttachedSeconds != 0 || got.Samples != 1 {

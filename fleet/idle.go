@@ -19,6 +19,11 @@ package fleet
 // Both rates fall out of one window, because a hold longer than the
 // node's idle budget contains both: the projects are attached at the
 // start of it and detached by the end.
+//
+// The first minutes of a hold are not that window, though. A node that
+// has just been under load is still writing the load down, and that work
+// is the load's cost rather than the sleeping project's, so a settle is
+// sampled and then thrown away, see After.
 
 import "sort"
 
@@ -86,6 +91,24 @@ type Idle struct {
 	// upper bound rather than a measurement.
 	SawDormant bool `json:"saw_dormant"`
 	Samples    int  `json:"samples"`
+}
+
+// After drops the samples taken in the first `seconds` of a hold, which
+// is how a settle is spent: sampled, kept in the result file so the
+// throwing away is visible, and left out of the rates.
+//
+// The phase before the hold flushed a load, and a node writes a load
+// down after answering it. Charging that to a project that is asleep
+// would answer the wrong question, and it would answer it differently
+// depending on how hard the phase before happened to push.
+func After(samples []Sample, seconds float64) []Sample {
+	var out []Sample
+	for _, s := range samples {
+		if s.Elapsed >= seconds {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // Rates classifies every interval between consecutive samples by what

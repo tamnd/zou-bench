@@ -95,8 +95,13 @@ type Scenario struct {
 	// longer than IdleSecs covers both halves of that, because the
 	// projects the phase before it attached are let go partway through
 	// and the same window then measures a node holding nothing.
+	// SettleSecs is the head of the hold that is sampled and then left
+	// out of the rates, because a node that has just been under load is
+	// still writing the load down, and that is the load's cost rather
+	// than a sleeping project's.
 	Hold       int `json:"hold"`
 	SampleSecs int `json:"sample_secs"`
+	SettleSecs int `json:"settle_secs"`
 }
 
 // IsREST reports whether the http driver owns this scenario.

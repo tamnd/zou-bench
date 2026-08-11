@@ -134,7 +134,7 @@ Each still has its own registry entry, its own database and its own prefix, and 
 A fleet result carries both sides of the story: what the client waited for, as percentiles and 30 second buckets per phase, and what the node says it was doing, read off its ops port as attach counts, the attach latency histogram, registry cache hits and misses, and the attached gauge.
 The process tree sampler gives RSS peak, median, timeline and slope across every postmaster the node started, which is the memory ceiling claim, and the runtime directory footprint is measured at the end of each phase, which is the disk one.
 
-Fleet scenario fields on top of the shared ones: `tenants`, `working_set`, `max_attached`, `idle_secs`, `shared_buffers`, `hold`, `sample_secs`, and `setup`.
+Fleet scenario fields on top of the shared ones: `tenants`, `working_set`, `max_attached`, `idle_secs`, `shared_buffers`, `hold`, `sample_secs`, `settle_secs`, and `setup`.
 The node's budgets live in the scenario because they are the shape of the deployment being measured rather than tuning: a ceiling below the fleet size is what makes the churn phase churn.
 
 ### The long tail
@@ -144,6 +144,8 @@ The long tail is the other question: eight hundred projects that are mostly asle
 That is a rate rather than a total, and it is only a rate if it is watched over a window with nothing in it, which is what the `hold` phase is.
 
 For `hold` seconds it sends no requests and every `sample_secs` it reads the attached gauge off the ops port and the store counters out of zou's `ZOU_STORE_STATS` file.
+Its first `settle_secs` are sampled and then left out of the rates, because a node that has just been under load is still writing the load down, and that work is the load's cost rather than a sleeping project's.
+The settled samples stay in the result file, so what was dropped and how much was still going on when the window opened are both visible.
 Each interval is then classified by what was attached at the start of it, so a hold longer than `idle_secs` answers both halves at once: the projects the steady phase left attached are let go partway through, and the rest of the same window is a node holding nothing.
 An interval whose counters went backwards is dropped rather than counted as negative work, because a counter only shrinks when the node restarted underneath the sampler.
 The two rates that come out are `dormant_per_hour`, what one node costs with nothing attached, and `attached_per_project_hour`, which is the attached rate with the node's own dormant rate subtracted before dividing by project hours.
@@ -161,7 +163,7 @@ Without them the compute line reads `not priced` instead of zero, and the per pr
 - `rest-warm-reads`: the REST read mix a small app makes, 8 clients, 60 s, against the tenant `rest-demo.sql` builds.
 - `fleet-1000`: a thousand small projects on one node with a hundred attached at once, a steady phase over a working set that fits and a churn phase over all thousand.
 - `fleet-1000-warm`: the same thousand tenants with a ten minute warmup, long enough that the working set is attached before the measured window opens.
-- `fleet-800-idle`: eight hundred mostly asleep projects, a hundred attached at once and an hour of hold, which is the long tail cost scenario.
+- `fleet-800-idle`: eight hundred mostly asleep projects, a hundred attached at once and ninety minutes of hold against a ten minute idle budget, which is the long tail cost scenario.
 - `fleet-smoke`: the same shape at ten tenants, for checking the harness works before spending half an hour on initdb.
 
 Scenario files are plain json, add one per workload and keep them small and explicit.

@@ -10,8 +10,9 @@
   "duration": 30,
   "warmup": 5,
   "rate": 40,
-  "hold": 150,
+  "hold": 180,
   "sample_secs": 10,
+  "settle_secs": 30,
   "setup": "fleet-tenant.sql",
   "requests": [
     {

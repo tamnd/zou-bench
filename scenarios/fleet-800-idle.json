@@ -4,14 +4,15 @@
   "tenants": 800,
   "working_set": 100,
   "max_attached": 100,
-  "idle_secs": 300,
+  "idle_secs": 600,
   "shared_buffers": "16MB",
   "clients": 16,
   "duration": 300,
   "warmup": 600,
   "rate": 200,
-  "hold": 3600,
+  "hold": 5400,
   "sample_secs": 30,
+  "settle_secs": 180,
   "setup": "fleet-tenant.sql",
   "requests": [
     {
