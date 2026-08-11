@@ -134,7 +134,7 @@ Each still has its own registry entry, its own database and its own prefix, and 
 A fleet result carries both sides of the story: what the client waited for, as percentiles and 30 second buckets per phase, and what the node says it was doing, read off its ops port as attach counts, the attach latency histogram, registry cache hits and misses, and the attached gauge.
 The process tree sampler gives RSS peak, median, timeline and slope across every postmaster the node started, which is the memory ceiling claim, and the runtime directory footprint is measured at the end of each phase, which is the disk one.
 
-Fleet scenario fields on top of the shared ones: `tenants`, `working_set`, `max_attached`, `idle_secs`, `shared_buffers`, `hold`, `sample_secs`, `settle_secs`, and `setup`.
+Fleet scenario fields on top of the shared ones: `tenants`, `working_set`, `max_attached`, `idle_secs`, `shared_buffers`, `hold`, `sample_secs`, `settle_secs`, `drain_secs`, and `setup`.
 The node's budgets live in the scenario because they are the shape of the deployment being measured rather than tuning: a ceiling below the fleet size is what makes the churn phase churn.
 
 ### The long tail
@@ -145,7 +145,8 @@ That is a rate rather than a total, and it is only a rate if it is watched over 
 
 For `hold` seconds it sends no requests and every `sample_secs` it reads the attached gauge off the ops port and the store counters out of zou's `ZOU_STORE_STATS` file.
 Its first `settle_secs` are sampled and then left out of the rates, because a node that has just been under load is still writing the load down, and that work is the load's cost rather than a sleeping project's.
-The settled samples stay in the result file, so what was dropped and how much was still going on when the window opened are both visible.
+`drain_secs` is the same idea on the far side of the transition: a project is let go by stopping its postmaster, the gauge reads zero as soon as the slot is dropped, and the postmaster goes on flushing after that, so the seconds after the last detach are charged to neither window.
+Every sample stays in the result file, the settled and drained ones included, so what was dropped and how much was still going on around it are both visible.
 Each interval is then classified by what was attached at the start of it, so a hold longer than `idle_secs` answers both halves at once: the projects the steady phase left attached are let go partway through, and the rest of the same window is a node holding nothing.
 An interval whose counters went backwards is dropped rather than counted as negative work, because a counter only shrinks when the node restarted underneath the sampler.
 The two rates that come out are `dormant_per_hour`, what one node costs with nothing attached, and `attached_per_project_hour`, which is the attached rate with the node's own dormant rate subtracted before dividing by project hours.

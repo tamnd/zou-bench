@@ -99,9 +99,14 @@ type Scenario struct {
 	// out of the rates, because a node that has just been under load is
 	// still writing the load down, and that is the load's cost rather
 	// than a sleeping project's.
+	// DrainSecs is the same idea on the far side of the transition: the
+	// gauge reads zero as soon as the slots are dropped, and the
+	// postmasters go on flushing after that, so the seconds following
+	// the last detach are charged to neither window.
 	Hold       int `json:"hold"`
 	SampleSecs int `json:"sample_secs"`
 	SettleSecs int `json:"settle_secs"`
+	DrainSecs  int `json:"drain_secs"`
 }
 
 // IsREST reports whether the http driver owns this scenario.

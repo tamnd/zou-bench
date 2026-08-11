@@ -13,6 +13,7 @@
   "hold": 5400,
   "sample_secs": 30,
   "settle_secs": 180,
+  "drain_secs": 300,
   "setup": "fleet-tenant.sql",
   "requests": [
     {

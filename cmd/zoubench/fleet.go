@@ -264,8 +264,10 @@ func cmdFleet(argv []string) {
 	// The phase deliberately outlasts the node's idle budget, so one
 	// window carries both: attached at the start, dormant by the end.
 	// Its first `settle` seconds are sampled and then left out, because
-	// the node is still writing down the phase before.
-	hold := func(name string, seconds, every, settle int) fleet.Idle {
+	// the node is still writing down the phase before, and so are the
+	// `drain` seconds after the last detach, for the same reason on the
+	// way back down.
+	hold := func(name string, seconds, every, settle, drain int) fleet.Idle {
 		started := time.Now()
 		var samples []fleet.Sample
 		take := func() {
@@ -289,11 +291,12 @@ func cmdFleet(argv []string) {
 			time.Sleep(time.Duration(every) * time.Second)
 			take()
 		}
-		rates := fleet.Rates(fleet.After(samples, float64(settle)))
+		rates := fleet.Rates(fleet.After(samples, float64(settle)), float64(drain))
 		block := map[string]any{
 			"seconds":     seconds,
 			"every":       every,
 			"settle_secs": settle,
+			"drain_secs":  drain,
 			"rates":       rates,
 			// Every sample, the settled ones included, because a reader
 			// has to be able to see what was left out and how much work
@@ -323,7 +326,7 @@ func cmdFleet(argv []string) {
 	}
 	var idle fleet.Idle
 	if want["hold"] && sc.Hold > 0 {
-		idle = hold("hold", sc.Hold, sc.SampleSecs, sc.SettleSecs)
+		idle = hold("hold", sc.Hold, sc.SampleSecs, sc.SettleSecs, sc.DrainSecs)
 	}
 	if want["churn"] {
 		// The churn phase draws from every tenant, so with a ceiling

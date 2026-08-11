@@ -12,7 +12,7 @@ func TestRatesSplitTheWindowByWhatWasAttached(t *testing.T) {
 		{Elapsed: 10, Attached: 2, Puts: 20},
 		{Elapsed: 20, Attached: 0, Puts: 40},
 		{Elapsed: 30, Attached: 0, Puts: 41},
-	})
+	}, 0)
 	if !got.SawDormant {
 		t.Fatal("a window that ended with nothing attached saw dormant")
 	}
@@ -40,7 +40,7 @@ func TestAWindowThatNeverWentDormantSaysSo(t *testing.T) {
 	got := Rates([]Sample{
 		{Elapsed: 0, Attached: 1, Gets: 0},
 		{Elapsed: 3600, Attached: 1, Gets: 100},
-	})
+	}, 0)
 	if got.SawDormant {
 		t.Fatal("nothing was ever dormant")
 	}
@@ -56,7 +56,7 @@ func TestARestartedCounterDropsItsIntervalRatherThanGoingNegative(t *testing.T) 
 		{Elapsed: 0, Attached: 0, Puts: 100},
 		{Elapsed: 10, Attached: 0, Puts: 5},
 		{Elapsed: 20, Attached: 0, Puts: 15},
-	})
+	}, 0)
 	if got.DormantSeconds != 10 {
 		t.Fatalf("dormant seconds = %v, the restarted interval is not one", got.DormantSeconds)
 	}
@@ -79,13 +79,42 @@ func TestASettleLeavesTheLoadsOwnFlushOutOfTheRate(t *testing.T) {
 		t.Fatalf("kept %+v", kept)
 	}
 	// One put a minute rather than the five thousand the load left.
-	if got := Rates(kept).AttachedPerProjectHour.Puts; got != 60 {
+	if got := Rates(kept, 0).AttachedPerProjectHour.Puts; got != 60 {
 		t.Fatalf("puts per project hour = %v", got)
 	}
 }
 
+// A project is let go by stopping its postmaster, and the gauge says
+// zero before that postmaster has finished flushing, so the seconds
+// after the last detach belong to neither window.
+func TestTheDrainAfterTheLastDetachIsNobodysRate(t *testing.T) {
+	samples := []Sample{
+		{Elapsed: 0, Attached: 4, Puts: 0},
+		{Elapsed: 10, Attached: 0, Puts: 100},
+		{Elapsed: 20, Attached: 0, Puts: 900},
+		{Elapsed: 30, Attached: 0, Puts: 901},
+		{Elapsed: 40, Attached: 0, Puts: 902},
+	}
+	// Without a drain the eight hundred puts the stopping postmasters
+	// wrote are read as what a node with nothing attached costs.
+	if got := Rates(samples, 0).DormantPerHour.Puts; got != 96240 {
+		t.Fatalf("undrained dormant puts an hour = %v", got)
+	}
+	got := Rates(samples, 15)
+	if got.DormantSeconds != 20 {
+		t.Fatalf("dormant seconds = %v, the drained ten are not dormant", got.DormantSeconds)
+	}
+	if got.DormantPerHour.Puts != 360 {
+		t.Fatalf("dormant puts an hour = %v", got.DormantPerHour.Puts)
+	}
+	// The drained seconds are not attached seconds either.
+	if got.AttachedSeconds != 10 {
+		t.Fatalf("attached seconds = %v", got.AttachedSeconds)
+	}
+}
+
 func TestOneSampleIsNoRateAtAll(t *testing.T) {
-	got := Rates([]Sample{{Elapsed: 0, Attached: 3}})
+	got := Rates([]Sample{{Elapsed: 0, Attached: 3}}, 0)
 	if got.SawDormant || got.AttachedSeconds != 0 || got.Samples != 1 {
 		t.Fatalf("%+v", got)
 	}

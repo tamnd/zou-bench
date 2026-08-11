@@ -24,6 +24,12 @@ package fleet
 // has just been under load is still writing the load down, and that work
 // is the load's cost rather than the sleeping project's, so a settle is
 // sampled and then thrown away, see After.
+//
+// The same is true on the other side of the transition. A project is let
+// go by stopping its postmaster, which shuts down and flushes on its own
+// time, while the gauge says zero the moment the slot is dropped. Work
+// arriving in that stretch belongs to the projects that just left, so
+// the drain after the last detach is left out too, see Rates.
 
 import "sort"
 
@@ -86,6 +92,9 @@ type Idle struct {
 	// dormant rate taken out of it first, so this is the project and
 	// not the node it happens to be on.
 	AttachedPerProjectHour Ops `json:"attached_ops_per_project_hour"`
+	// Seconds after the last detach that were left out of the dormant
+	// window, being the stopping projects still flushing.
+	DrainSeconds float64 `json:"drain_seconds"`
 	// False when the window never went dormant, in which case the
 	// per project rate carries the node's housekeeping in it and is an
 	// upper bound rather than a measurement.
@@ -120,12 +129,26 @@ func After(samples []Sample, seconds float64) []Sample {
 // ends with none was a hundred attached for most of it, and the
 // detaches themselves are work the attached rate should carry rather
 // than work a dormant node is blamed for.
-func Rates(samples []Sample) Idle {
-	out := Idle{Samples: len(samples)}
+//
+// `drain` is how long after the last sample that still saw something
+// attached the node is taken to be stopping rather than stopped. Those
+// intervals are counted in neither window: the postmasters flushing in
+// them are not the node's own housekeeping, and charging them to the
+// projects that are already gone would price a detach twice.
+func Rates(samples []Sample, drain float64) Idle {
+	out := Idle{Samples: len(samples), DrainSeconds: drain}
 	if len(samples) < 2 {
 		return out
 	}
 	sort.SliceStable(samples, func(i, j int) bool { return samples[i].Elapsed < samples[j].Elapsed })
+	// When the node last held something, so an interval can ask how
+	// long ago that was.
+	lastAttached := -1.0
+	for _, s := range samples {
+		if s.Attached > 0 {
+			lastAttached = s.Elapsed
+		}
+	}
 	for i := 1; i < len(samples); i++ {
 		prev, cur := samples[i-1], samples[i]
 		seconds := cur.Elapsed - prev.Elapsed
@@ -145,6 +168,9 @@ func Rates(samples []Sample) Idle {
 			continue
 		}
 		if prev.Attached == 0 {
+			if lastAttached >= 0 && prev.Elapsed < lastAttached+drain {
+				continue
+			}
 			out.DormantSeconds += seconds
 			out.DormantOps = out.DormantOps.add(ops)
 			continue
