@@ -89,6 +89,14 @@ type Scenario struct {
 	MaxAttached   int    `json:"max_attached"`
 	IdleSecs      int    `json:"idle_secs"`
 	SharedBuffers string `json:"shared_buffers"`
+	// Hold is seconds the fleet's hold phase watches a node nobody is
+	// asking anything of, sampling every SampleSecs. It is the long
+	// tail measurement: what a project costs while it is asleep. A hold
+	// longer than IdleSecs covers both halves of that, because the
+	// projects the phase before it attached are let go partway through
+	// and the same window then measures a node holding nothing.
+	Hold       int `json:"hold"`
+	SampleSecs int `json:"sample_secs"`
 }
 
 // IsREST reports whether the http driver owns this scenario.
@@ -147,6 +155,9 @@ func Load(path string) (Scenario, map[string]any, error) {
 		}
 		if sc.IdleSecs == 0 {
 			sc.IdleSecs = 300
+		}
+		if sc.SampleSecs == 0 {
+			sc.SampleSecs = 15
 		}
 		// A working set larger than the fleet is a scenario that
 		// cannot do what it says, and the time to say so is at load.
