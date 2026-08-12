@@ -1,0 +1,60 @@
+{
+  "readings": {
+    "cold-attach-object-store-m1b": {
+      "value": 245.736,
+      "label": "zou-minio-server3",
+      "host": "vmi3391933",
+      "date": "2026-08-06T21:59:55Z",
+      "source": "cold-attach-zou-minio-server3-20260806T215955.json"
+    },
+    "cold-attach-object-store-m3": {
+      "value": 245.736,
+      "label": "zou-minio-server3",
+      "host": "vmi3391933",
+      "date": "2026-08-06T21:59:55Z",
+      "source": "cold-attach-zou-minio-server3-20260806T215955.json"
+    },
+    "cold-attach-object-store-p95": {
+      "value": 501.147,
+      "label": "zou-minio-server3",
+      "host": "vmi3391933",
+      "date": "2026-08-06T21:59:55Z",
+      "source": "cold-attach-zou-minio-server3-20260806T215955.json"
+    },
+    "density-churn-p99": {
+      "value": 18239.516,
+      "label": "zou-fleet-1000-warm",
+      "host": "GamingPC",
+      "date": "2026-08-10T17:48:13Z",
+      "source": "fleet-1000-warm-zou-fleet-1000-warm-20260810T174813.json"
+    },
+    "density-rss-peak": {
+      "value": 15.738588,
+      "label": "zou-fleet-1000-warm",
+      "host": "GamingPC",
+      "date": "2026-08-10T17:48:13Z",
+      "source": "fleet-1000-warm-zou-fleet-1000-warm-20260810T174813.json"
+    },
+    "density-steady-errors": {
+      "value": 0,
+      "label": "zou-fleet-1000-warm",
+      "host": "GamingPC",
+      "date": "2026-08-10T17:48:13Z",
+      "source": "fleet-1000-warm-zou-fleet-1000-warm-20260810T174813.json"
+    },
+    "density-steady-p99": {
+      "value": 1.298,
+      "label": "zou-fleet-1000-warm",
+      "host": "GamingPC",
+      "date": "2026-08-10T17:48:13Z",
+      "source": "fleet-1000-warm-zou-fleet-1000-warm-20260810T174813.json"
+    },
+    "density-tenants": {
+      "value": 1000,
+      "label": "zou-fleet-1000-warm",
+      "host": "GamingPC",
+      "date": "2026-08-10T17:48:13Z",
+      "source": "fleet-1000-warm-zou-fleet-1000-warm-20260810T174813.json"
+    }
+  }
+}
