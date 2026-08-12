@@ -38,8 +38,12 @@ func TestAFullOutdirFallsBackInsteadOfLosingTheRun(t *testing.T) {
 		t.Skipf("cannot make an unwritable directory here: %v", err)
 	}
 	t.Cleanup(func() { os.Chmod(dir, 0o700) })
-	if os.Geteuid() == 0 {
-		t.Skip("root writes to it anyway")
+	// Read only bits are advice on some systems and nothing at all to
+	// root, and a soak does not run on those anyway, so ask the disk
+	// whether the premise holds rather than assuming it.
+	if probe := filepath.Join(dir, "probe"); os.WriteFile(probe, nil, 0o644) == nil {
+		os.Remove(probe)
+		t.Skip("this filesystem let the write through, there is no failure to fall back from")
 	}
 
 	name := "sustain-6h-server2-20260810T215546.json"
