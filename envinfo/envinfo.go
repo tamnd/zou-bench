@@ -66,6 +66,34 @@ func Capture() map[string]any {
 			out["cpu_model"] = v
 		}
 	}
+	if zou := ZouEnv(os.Environ()); len(zou) > 0 {
+		out["zou_env"] = zou
+	}
+	return out
+}
+
+// ZouEnv picks the ZOU_ variables out of an environment. The node
+// inherits the harness environment, and several of these switch which
+// code path the run measures rather than tuning the one it takes:
+// ZOU_PAGESERVE=1 is the difference between reads going to the page
+// service and pages being fetched as objects, which is a factor of
+// twenty five in recovery time and a different system to compare
+// against. A result that does not say which one it measured cannot be
+// read six weeks later, and the way that failure shows up is two runs
+// that look like a regression and were never the same test.
+//
+// Values ride along whole. These name paths and switches, not secrets,
+// and a path is often the answer to why two runs differ.
+func ZouEnv(environ []string) map[string]any {
+	out := map[string]any{}
+	for _, kv := range environ {
+		if !strings.HasPrefix(kv, "ZOU_") {
+			continue
+		}
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			out[k] = v
+		}
+	}
 	return out
 }
 
