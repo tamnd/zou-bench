@@ -1,6 +1,10 @@
 package sustain
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestParseCompactStatusReadsTheArrayAndRefusesGarbage(t *testing.T) {
 	shards, err := ParseCompactStatus([]byte(`[{"shard":0,"debt":42,"amp":3.5,"bound":5},{"shard":1,"debt":0,"amp":6.25,"bound":5}]`))
@@ -110,5 +114,28 @@ func TestLedgerHandsOutEachIdOnceAndChunksTheAcked(t *testing.T) {
 		if flat[i] != want[i] {
 			t.Fatalf("flat = %v, want %v", flat, want)
 		}
+	}
+}
+
+// A check that could not run and an identity that came back broken
+// both read as false, so the reason has to survive into the result
+// file or every read failure looks like lost data.
+func TestDrillCarriesWhyACheckCouldNotRun(t *testing.T) {
+	broke := false
+	d := Drill{Seq: 6, Mode: "death", LedgerOK: false, BalanceOK: &broke,
+		CheckError: "balance check: read tcp: connection reset by peer"}
+	out, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"check_error":"balance check: read tcp: connection reset by peer"`) {
+		t.Fatalf("drill = %s", out)
+	}
+	clean, err := json.Marshal(Drill{Seq: 7, Mode: "crash", LedgerOK: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(clean), "check_error") {
+		t.Fatalf("a drill whose checks ran carries no error: %s", clean)
 	}
 }
