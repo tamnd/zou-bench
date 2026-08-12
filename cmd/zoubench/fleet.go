@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tamnd/zou-bench/cost"
 	"github.com/tamnd/zou-bench/envinfo"
 	"github.com/tamnd/zou-bench/fleet"
 	"github.com/tamnd/zou-bench/latency"
@@ -47,7 +48,7 @@ func cmdFleet(argv []string) {
 	workdir := fs.String("workdir", "", "runtime directories, logs, and the state file")
 	label := fs.String("label", "", "zou-localfs, zou-minio, ...")
 	outdir := fs.String("outdir", "results", "result directory")
-	phases := fs.String("phases", "provision,steady,churn", "which phases to run")
+	phases := fs.String("phases", "provision,steady,hold,churn", "which phases to run")
 	jobs := fs.Int("jobs", 8, "tenants provisioned at once")
 	cpus := fs.String("cpus", "", "cpu list the node is pinned to, for example 0-7")
 	httpPort := fs.Int("http", 54321, "http door")
@@ -55,6 +56,10 @@ func cmdFleet(argv []string) {
 	opsPort := fs.Int("ops", 54323, "ops port, where the node's own numbers are read")
 	prefix := fs.String("prefix", "t", "tenant ref prefix")
 	keep := fs.Bool("keep-node", false, "leave the node running after the run")
+	cardsdir := fs.String("cards", "pricecards", "directory of price cards")
+	pricecard := fs.String("pricecard", "", "price the hold phase against these cards, comma separated")
+	boxUSD := fs.Float64("box-usd-month", 0, "what the node itself costs a month, 0 leaves compute out")
+	boxSource := fs.String("box-source", "", "where that price came from, recorded with it")
 	var rest []string
 	for _, a := range argv {
 		if !strings.HasPrefix(a, "-") && strings.HasSuffix(a, ".json") {
@@ -160,6 +165,7 @@ func cmdFleet(argv []string) {
 	}
 
 	phase := func(name string, drawFrom []string) {
+		opsPhaseBefore, statsOK := zoustats.Read(statsPath)
 		before, errBefore := fleet.Scrape(opsURL)
 		out, err := fleet.Drive(context.Background(), fleet.Options{
 			BaseURL:  base,
@@ -218,6 +224,17 @@ func cmdFleet(argv []string) {
 		if fp, err := storefs.Measure(runtime); err == nil {
 			block["runtime_bytes"] = fp.Bytes
 		}
+		// What this phase alone asked of the store. The whole run's
+		// counters are reported below as well, but they carry
+		// provisioning, which is a thousand initdbs and drowns out
+		// everything a phase did.
+		if statsOK == nil {
+			if after, err := zoustats.Read(statsPath); err == nil {
+				if d, err := zoustats.Diff(opsPhaseBefore, after); err == nil {
+					block["store_ops"] = zoustats.Report(d)
+				}
+			}
+		}
 		fmt.Printf("%s: %d requests, %d errors, p50 %.1f ms, p99 %.1f ms\n",
 			name, out.Requests, out.Errors,
 			latency.Percentiles(out.Samples)["p50"], latency.Percentiles(out.Samples)["p99"])
@@ -234,6 +251,68 @@ func cmdFleet(argv []string) {
 		result[name] = block
 	}
 
+	// hold asks the node for nothing at all for a while, and watches.
+	//
+	// Everything else here measures what a node does when it is asked.
+	// The long tail bill is the other half: eight hundred projects
+	// nobody is using still sit in a bucket, and whatever the node does
+	// on its own while they sleep is what they cost forever. That is a
+	// rate, so it is sampled rather than totalled, and the gauge is
+	// sampled with it because a project the node is holding and a
+	// project it has let go are two different prices.
+	//
+	// The phase deliberately outlasts the node's idle budget, so one
+	// window carries both: attached at the start, dormant by the end.
+	// Its first `settle` seconds are sampled and then left out, because
+	// the node is still writing down the phase before, and so are the
+	// `drain` seconds after the last detach, for the same reason on the
+	// way back down.
+	hold := func(name string, seconds, every, settle, drain int) fleet.Idle {
+		started := time.Now()
+		var samples []fleet.Sample
+		take := func() {
+			m, errM := fleet.Scrape(opsURL)
+			c, errC := zoustats.Read(statsPath)
+			if errM != nil || errC != nil {
+				return
+			}
+			t := zoustats.Sum(c)
+			samples = append(samples, fleet.Sample{
+				Elapsed:  round2(time.Since(started).Seconds()),
+				Attached: int(m.Get("zou_tenants_attached")),
+				Puts:     t.Puts,
+				Gets:     t.Gets,
+				Lists:    t.Lists,
+				Deletes:  t.Deletes,
+			})
+		}
+		take()
+		for time.Since(started) < time.Duration(seconds)*time.Second {
+			time.Sleep(time.Duration(every) * time.Second)
+			take()
+		}
+		rates := fleet.Rates(fleet.After(samples, float64(settle)), float64(drain))
+		block := map[string]any{
+			"seconds":     seconds,
+			"every":       every,
+			"settle_secs": settle,
+			"drain_secs":  drain,
+			"rates":       rates,
+			// Every sample, the settled ones included, because a reader
+			// has to be able to see what was left out and how much work
+			// was still going on when the window opened.
+			"samples": samples,
+		}
+		if fp, err := storefs.Measure(runtime); err == nil {
+			block["runtime_bytes"] = fp.Bytes
+		}
+		result[name] = block
+		fmt.Printf("%s: %.0f s attached and %.0f s dormant, %.1f puts and %.1f gets an hour per held project\n",
+			name, rates.AttachedSeconds, rates.DormantSeconds,
+			rates.AttachedPerProjectHour.Puts, rates.AttachedPerProjectHour.Gets)
+		return rates
+	}
+
 	ready := state.Ready
 	if want["steady"] {
 		// The steady phase draws from a working set the node's ceiling
@@ -244,6 +323,10 @@ func cmdFleet(argv []string) {
 			width = len(ready)
 		}
 		phase("steady", ready[:width])
+	}
+	var idle fleet.Idle
+	if want["hold"] && sc.Hold > 0 {
+		idle = hold("hold", sc.Hold, sc.SampleSecs, sc.SettleSecs, sc.DrainSecs)
 	}
 	if want["churn"] {
 		// The churn phase draws from every tenant, so with a ceiling
@@ -270,6 +353,55 @@ func cmdFleet(argv []string) {
 		result["runtime"] = map[string]any{"bytes": fp.Bytes, "objects": fp.Objects}
 	}
 	result["tenants_ready"] = state.Count()
+
+	// Dollars, from the hold phase and the store the run left behind.
+	//
+	// Only the hold phase, because a month of this fleet is a month of
+	// nothing happening, and the steady and churn windows are the fleet
+	// being hammered. Pricing those as if they ran all month would
+	// answer a question nobody asked.
+	if *pricecard != "" && idle.Samples > 0 {
+		if fp, err := storefs.Measure(*store); err == nil && fp.Objects > 0 {
+			tail := cost.Tail{
+				Projects:       state.Count(),
+				AttachedAtOnce: sc.MaxAttached,
+				StorageBytes:   fp.Bytes,
+				DormantPerHour: cost.Ops{
+					Puts:    idle.DormantPerHour.Puts,
+					Gets:    idle.DormantPerHour.Gets,
+					Lists:   idle.DormantPerHour.Lists,
+					Deletes: idle.DormantPerHour.Deletes,
+				},
+				AttachedPerProjectHour: cost.Ops{
+					Puts:    idle.AttachedPerProjectHour.Puts,
+					Gets:    idle.AttachedPerProjectHour.Gets,
+					Lists:   idle.AttachedPerProjectHour.Lists,
+					Deletes: idle.AttachedPerProjectHour.Deletes,
+				},
+				BoxUSDMonth: *boxUSD,
+				BoxSource:   *boxSource,
+			}
+			var priced []any
+			for _, name := range strings.Split(*pricecard, ",") {
+				name = strings.TrimSpace(name)
+				if name == "" {
+					continue
+				}
+				card, err := cost.Find(*cardsdir, name)
+				die(err)
+				block := cost.Monthly(card, tail)
+				// A per project rate taken from a window that never
+				// went dormant has the node's own housekeeping inside
+				// it, so the dollars are an upper bound and the file
+				// has to say which it is.
+				block["dormant_window_measured"] = idle.SawDormant
+				priced = append(priced, block)
+				fmt.Printf("cost: %s, %v usd a month for %d projects, %v each\n",
+					name, block["total_usd_month"], tail.Projects, block["usd_per_project_month"])
+			}
+			result["cost"] = priced
+		}
+	}
 	stop()
 
 	die(os.MkdirAll(*outdir, 0o755))

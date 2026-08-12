@@ -10,7 +10,7 @@ A claim nothing has measured yet says so instead of being left off, and a headli
 
 ## Where it stands
 
-4 of 5 claims met, 1 missed, 0 simulated, 0 not measured yet, and 4 numbers reported without a line.
+4 of 7 claims met, 3 missed, 0 simulated, 0 not measured yet, and 10 numbers reported without a line.
 
 ## Cold attach
 
@@ -34,14 +34,33 @@ The tail is reported without a line because neither milestone writes one, and it
 | Steady p99 at 200 rps, working set attached | no line | 1.298 ms | reported | zou-fleet-1000-warm on GamingPC | 2026-08-10 | zou#3 load test, 1000 small tenants with p99s |
 | Churn p99, drawing from all thousand | no line | 18240 ms | reported | zou-fleet-1000-warm on GamingPC | 2026-08-10 | zou#3 load test, attach churn |
 | Peak RSS of the whole tree, 100 attached | no line | 15.74 GB | reported | zou-fleet-1000-warm on GamingPC | 2026-08-10 | zou#3 load test, memory ceiling |
+| Tenants created a second, from empty | >= 100 per second | 0.086 per second | missed | zou-fleet-800-idle on GamingPC | 2026-08-11 | zou#31 create rate over 100 tenants a second sustained |
 
 The node is pinned to cpus 0-7 with taskset, so the eight cores are the deployment being measured and the traffic generator is not sharing them.
 Warmup has to outlast attaching the working set or the measured window is an attach storm rather than a steady state, which is why the row reads from the warm scenario and not from fleet-1000.
 Churn draws uniformly from ten times what the ceiling holds, so nearly every request pays for an attach plus the eviction making room for it, and today an attach is eager: it hydrates the database before the first row rather than faulting pages in as they are asked for.
 Reported rather than judged because the M1b memory line is written for 10,000 idle attached tenants under 16 GB and this run holds a hundred, so the two are not the same measurement, they are a decade apart on the same axis.
+Provisioning is read off the fleet that was built from nothing, because a resumed run creates a handful of tenants and reports the rate of those, which flatters the number by an order of magnitude.
+
+## Long tail cost
+
+| claim | line | measured | | where | when | earns |
+| --- | --- | ---: | --- | --- | --- | --- |
+| 800 mostly idle projects, all in on S3 standard | <= 90 usd a month | 294.2 usd a month | missed | zou-fleet-800-idle on GamingPC | 2026-08-11 | zou#31 Neon's own 800 mostly idle tenants scenario under 90 a month |
+| Per project, all in on S3 standard | no line | 0.368 usd a month | reported | zou-fleet-800-idle on GamingPC | 2026-08-11 | context for the row above, Neon models about 1.10 |
+| The bytes for all 800, S3 standard | no line | 0.764 usd a month | reported | zou-fleet-800-idle on GamingPC | 2026-08-11 | context, the half of the bill that is data at rest |
+| The requests for all 800, S3 standard | no line | 293.4 usd a month | reported | zou-fleet-800-idle on GamingPC | 2026-08-11 | context, the other half, which is all of it |
+| Puts an hour by a project nobody is using, dormant | no line | 0 puts an hour | reported | zou-fleet-800-idle on GamingPC | 2026-08-11 | context, what scale to zero is worth |
+| Puts an hour by a project nobody is using, attached | no line | 742.9 puts an hour | reported | zou-fleet-800-idle on GamingPC | 2026-08-11 | context, and the whole of the row above it |
+| 800 mostly idle projects, all in on R2 | no line | 264.6 usd a month | reported | zou-fleet-800-idle on GamingPC | 2026-08-11 | context, the same fleet priced where requests and egress are cheaper |
+
+The dollars come from the hold phase only, because a month of this fleet is a month of nothing happening and pricing the steady and churn windows as if they ran all month would answer a question nobody asked.
+The M1b line for an idle tenant is written per gigabyte and these projects hold tens of megabytes each, so this number is on the page as the shape of the bill rather than as that line being earned, which needs a fleet of gigabyte tenants.
+A dormant project costs nothing at all, so every dollar on this page is written by the hundred that stay attached, each of them putting an object every five seconds with nobody asking it for anything. That rate is the thing to fix, not the price card.
 
 ## Where the numbers came from
 
 - `cold-attach-zou-localfs-gamingpc-20260806T182641.json`
 - `cold-attach-zou-minio-server3-20260806T215955.json`
 - `fleet-1000-warm-zou-fleet-1000-warm-20260810T174813.json`
+- `fleet-800-idle-zou-fleet-800-idle-20260811T232022.json`

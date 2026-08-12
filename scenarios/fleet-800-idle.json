@@ -1,0 +1,38 @@
+{
+  "name": "fleet-800-idle",
+  "kind": "fleet",
+  "tenants": 800,
+  "working_set": 100,
+  "max_attached": 100,
+  "idle_secs": 600,
+  "shared_buffers": "16MB",
+  "clients": 16,
+  "duration": 300,
+  "warmup": 600,
+  "rate": 200,
+  "hold": 5400,
+  "sample_secs": 30,
+  "settle_secs": 180,
+  "drain_secs": 300,
+  "setup": "fleet-tenant.sql",
+  "requests": [
+    {
+      "name": "row-by-pk",
+      "path": "/bench_rows?id=eq.{{rand:1:100}}&select=id,title,done",
+      "auth": "user",
+      "weight": 5
+    },
+    {
+      "name": "page-of-20",
+      "path": "/bench_rows?select=id,title,done&order=id.desc&limit=20",
+      "auth": "user",
+      "weight": 3
+    },
+    {
+      "name": "filtered-page",
+      "path": "/bench_rows?done=is.false&tag=eq.{{rand:0:9}}&select=id,title&order=id&limit=20",
+      "auth": "anon",
+      "weight": 2
+    }
+  ]
+}

@@ -114,10 +114,12 @@ When op counts and transactions were both measured, the cost block adds `usd_per
 The node is started by the harness, unlike `run` and `rest`, because half of what is measured is what the node does when nobody asked it to: the attach a request triggers, the eviction at the ceiling, and the memory the whole process tree settles at.
 `--cpus` pins it with taskset, which is how a box with more cores than the node is supposed to have still measures that node: the harness and the traffic it generates must not be sharing the cores the answer is about.
 
-Three phases, chosen with `--phases`.
+Four phases, chosen with `--phases`.
 `provision` registers every ref, applies the scenario's `setup` sql over the postgres door, which is the step that runs initdb and captures the genesis, and sends one http request, which is what applies the tenant contract the api needs.
 `steady` draws requests from a working set the node's ceiling can hold, so nothing is evicted and the answer is what a packed node costs when the projects being used fit.
+`hold` asks for nothing at all and watches, which is the long tail measurement described below.
 `churn` draws from every tenant, so with a ceiling below the fleet size the node attaches and evicts for the whole window, and the gap between the two phases' tails is the number a fleet is sized on.
+All four run by default, and a scenario with no `hold` in it skips that one on its own.
 
 A steady phase only measures a packed node if its warmup outlasts attaching the whole working set, which at 16 clients and a several second attach is minutes rather than seconds.
 Size `warmup` at working set times attach divided by clients and then some, or the measured window reports the attach storm instead of the node, and the difference between the two is three orders of magnitude at the tail.
@@ -132,8 +134,27 @@ Each still has its own registry entry, its own database and its own prefix, and 
 A fleet result carries both sides of the story: what the client waited for, as percentiles and 30 second buckets per phase, and what the node says it was doing, read off its ops port as attach counts, the attach latency histogram, registry cache hits and misses, and the attached gauge.
 The process tree sampler gives RSS peak, median, timeline and slope across every postmaster the node started, which is the memory ceiling claim, and the runtime directory footprint is measured at the end of each phase, which is the disk one.
 
-Fleet scenario fields on top of the shared ones: `tenants`, `working_set`, `max_attached`, `idle_secs`, `shared_buffers`, and `setup`.
+Fleet scenario fields on top of the shared ones: `tenants`, `working_set`, `max_attached`, `idle_secs`, `shared_buffers`, `hold`, `sample_secs`, `settle_secs`, `drain_secs`, and `setup`.
 The node's budgets live in the scenario because they are the shape of the deployment being measured rather than tuning: a ceiling below the fleet size is what makes the churn phase churn.
+
+### The long tail
+
+The steady and churn phases measure a node under load, which is the number a fleet is sized on.
+The long tail is the other question: eight hundred projects that are mostly asleep, where the bill is not throughput but whatever the node does on its own, forever, per project.
+That is a rate rather than a total, and it is only a rate if it is watched over a window with nothing in it, which is what the `hold` phase is.
+
+For `hold` seconds it sends no requests and every `sample_secs` it reads the attached gauge off the ops port and the store counters out of zou's `ZOU_STORE_STATS` file.
+Its first `settle_secs` are sampled and then left out of the rates, because a node that has just been under load is still writing the load down, and that work is the load's cost rather than a sleeping project's.
+`drain_secs` is the same idea on the far side of the transition: a project is let go by stopping its postmaster, the gauge reads zero as soon as the slot is dropped, and the postmaster goes on flushing after that, so the seconds after the last detach are charged to neither window.
+Every sample stays in the result file, the settled and drained ones included, so what was dropped and how much was still going on around it are both visible.
+Each interval is then classified by what was attached at the start of it, so a hold longer than `idle_secs` answers both halves at once: the projects the steady phase left attached are let go partway through, and the rest of the same window is a node holding nothing.
+An interval whose counters went backwards is dropped rather than counted as negative work, because a counter only shrinks when the node restarted underneath the sampler.
+The two rates that come out are `dormant_per_hour`, what one node costs with nothing attached, and `attached_per_project_hour`, which is the attached rate with the node's own dormant rate subtracted before dividing by project hours.
+
+`--pricecard <names>` turns those rates into a monthly bill, one block per named card.
+A month is 730 hours of the dormant rate plus 730 hours of the attached rate times the ceiling, priced per op, plus the store bytes measured at the end of the run, and `usd_per_project_month` divides by the fleet size.
+The store is only half the bill, so `--box-usd-month` and `--box-source` carry the price of the box the node runs on, from an invoice rather than a guess.
+Without them the compute line reads `not priced` instead of zero, and the per project number then covers the store alone, which is what `store_usd_per_project_month` always reports.
 
 ## Scenarios
 
@@ -143,6 +164,7 @@ The node's budgets live in the scenario because they are the shape of the deploy
 - `rest-warm-reads`: the REST read mix a small app makes, 8 clients, 60 s, against the tenant `rest-demo.sql` builds.
 - `fleet-1000`: a thousand small projects on one node with a hundred attached at once, a steady phase over a working set that fits and a churn phase over all thousand.
 - `fleet-1000-warm`: the same thousand tenants with a ten minute warmup, long enough that the working set is attached before the measured window opens.
+- `fleet-800-idle`: eight hundred mostly asleep projects, a hundred attached at once and ninety minutes of hold against a ten minute idle budget, which is the long tail cost scenario.
 - `fleet-smoke`: the same shape at ten tenants, for checking the harness works before spending half an hour on initdb.
 
 Scenario files are plain json, add one per workload and keep them small and explicit.
