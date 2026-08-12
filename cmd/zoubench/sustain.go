@@ -258,16 +258,26 @@ func cmdSustain(argv []string) {
 			killT, killT.Add(time.Hour)); ok {
 			drill.RTOms = &rto
 		}
-		drill.LedgerOK = verifyLedger(addr, pguser, led)
-		if !drill.LedgerOK {
+		ledgerOK, checkErr := verifyLedger(addr, pguser, led)
+		drill.LedgerOK = ledgerOK
+		if !ledgerOK {
 			violations++
 		}
 		if tpcb {
-			ok := verifyBalance(addr, pguser)
+			ok, err := verifyBalance(addr, pguser)
 			drill.BalanceOK = &ok
+			if checkErr == nil {
+				checkErr = err
+			}
 			if !ok {
 				violations++
 			}
+		}
+		if checkErr != nil {
+			// The check could not run, which is its own kind of
+			// failure and not the identity coming back broken.
+			drill.CheckError = checkErr.Error()
+			fmt.Fprintf(os.Stderr, "zoubench: segment %d %s drill: %v\n", seq, mode, checkErr)
 		}
 		drills = append(drills, drill)
 
@@ -749,7 +759,13 @@ func gcLoop(zoubin, store string, every time.Duration, retention, window string,
 // length. Rows in the table that no chunk mentions are ids whose ack
 // was lost in a kill and were never recorded; they are outside the
 // promise and not checked.
-func verifyLedger(addr, user string, led *sustain.Ledger) bool {
+//
+// A query that never answered comes back with the error beside the
+// false. Both are failures, the run promised a readable database
+// after the drill and did not deliver one, but they are different
+// failures and a result file that only says false sends the reader
+// looking for lost writes when the database was merely unreadable.
+func verifyLedger(addr, user string, led *sustain.Ledger) (bool, error) {
 	for _, chunk := range led.Chunks(10000) {
 		var sb strings.Builder
 		for i, id := range chunk {
@@ -760,11 +776,14 @@ func verifyLedger(addr, user string, led *sustain.Ledger) bool {
 		}
 		got, err := soakQuery(addr, user,
 			fmt.Sprintf("select count(*) from zoubench_ledger where id = any('{%s}'::bigint[])", sb.String()))
-		if err != nil || got != strconv.Itoa(len(chunk)) {
-			return false
+		if err != nil {
+			return false, fmt.Errorf("ledger check: %w", err)
+		}
+		if got != strconv.Itoa(len(chunk)) {
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 // verifyBalance is the tpcb identity from the zou soak script: the
@@ -772,11 +791,15 @@ func verifyLedger(addr, user string, led *sustain.Ledger) bool {
 // teller balance sums, which proves replay was exact and not merely
 // present. It only means something when pgbench ran with -n, since a
 // plain run truncates pgbench_history and wipes the left hand side.
-func verifyBalance(addr, user string) bool {
+// Like verifyLedger, a query that failed is reported as itself.
+func verifyBalance(addr, user string) (bool, error) {
 	got, err := soakQuery(addr, user,
 		"select coalesce(sum(delta),0) = (select sum(abalance) from pgbench_accounts)"+
 			" and coalesce(sum(delta),0) = (select sum(bbalance) from pgbench_branches)"+
 			" and coalesce(sum(delta),0) = (select sum(tbalance) from pgbench_tellers)"+
 			" from pgbench_history")
-	return err == nil && got == "t"
+	if err != nil {
+		return false, fmt.Errorf("balance check: %w", err)
+	}
+	return got == "t", nil
 }

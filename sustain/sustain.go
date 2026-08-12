@@ -70,14 +70,22 @@ func BoundHeld(over []bool) bool {
 // rather than zero because a zero would read as instant recovery, the
 // exact opposite of what happened. BalanceOK is nil when the workload
 // was not tpcb shaped and the identity had nothing to say.
+//
+// CheckError is what an identity check hit when it could not run at
+// all. The ok flags are false either way, since a database that will
+// not answer after a drill has failed the promise, but the two are
+// different failures: one says writes went missing, the other says
+// the reads did. Without the text the result file makes every read
+// failure look like data loss.
 type Drill struct {
-	Seq       int      `json:"seq"`
-	Mode      string   `json:"mode"`
-	T         float64  `json:"t_s"`
-	RTOms     *float64 `json:"rto_ms,omitempty"`
-	LedgerOK  bool     `json:"ledger_ok"`
-	BalanceOK *bool    `json:"balance_ok,omitempty"`
-	KillError string   `json:"kill_error,omitempty"`
+	Seq        int      `json:"seq"`
+	Mode       string   `json:"mode"`
+	T          float64  `json:"t_s"`
+	RTOms      *float64 `json:"rto_ms,omitempty"`
+	LedgerOK   bool     `json:"ledger_ok"`
+	BalanceOK  *bool    `json:"balance_ok,omitempty"`
+	KillError  string   `json:"kill_error,omitempty"`
+	CheckError string   `json:"check_error,omitempty"`
 }
 
 // RTOSummary groups the measured recovery times by drill mode and
