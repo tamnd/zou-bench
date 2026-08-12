@@ -109,5 +109,64 @@
     "target": 0,
     "earns": "zou#3 load test, memory ceiling",
     "note": "Reported rather than judged because the M1b memory line is written for 10,000 idle attached tenants under 16 GB and this run holds a hundred, so the two are not the same measurement, they are a decade apart on the same axis."
+  },
+  {
+    "id": "provision-rate",
+    "group": "Density",
+    "claim": "Tenants created a second, from empty",
+    "scenario": "fleet-800-idle",
+    "path": "provision.tenants_per_minute",
+    "divide_by": 60,
+    "unit": "per second",
+    "compare": ">=",
+    "target": 100,
+    "earns": "zou#31 create rate over 100 tenants a second sustained",
+    "note": "Provisioning is read off the fleet that was built from nothing, because a resumed run creates a handful of tenants and reports the rate of those, which flatters the number by an order of magnitude."
+  },
+  {
+    "id": "long-tail-800-total",
+    "group": "Long tail cost",
+    "claim": "800 mostly idle projects, all in on S3 standard",
+    "scenario": "fleet-800-idle",
+    "path": "cost.card=aws-s3-standard.total_usd_month",
+    "unit": "usd a month",
+    "compare": "<=",
+    "target": 90,
+    "earns": "zou#31 Neon's own 800 mostly idle tenants scenario under 90 a month",
+    "note": "The dollars come from the hold phase only, because a month of this fleet is a month of nothing happening and pricing the steady and churn windows as if they ran all month would answer a question nobody asked."
+  },
+  {
+    "id": "long-tail-800-per-project",
+    "group": "Long tail cost",
+    "claim": "Per project, all in on S3 standard",
+    "scenario": "fleet-800-idle",
+    "path": "cost.card=aws-s3-standard.usd_per_project_month",
+    "unit": "usd a month",
+    "compare": "",
+    "target": 0,
+    "earns": "context for the row above, Neon models about 1.10"
+  },
+  {
+    "id": "long-tail-800-store-per-project",
+    "group": "Long tail cost",
+    "claim": "Per project, bytes only, S3 standard",
+    "scenario": "fleet-800-idle",
+    "path": "cost.card=aws-s3-standard.store_usd_per_project_month",
+    "unit": "usd a month",
+    "compare": "",
+    "target": 0,
+    "earns": "context for the M1b idle tenant line",
+    "note": "The M1b line for an idle tenant is written per gigabyte and these projects hold tens of megabytes each, so this number is on the page as the shape of the bill rather than as that line being earned, which needs a fleet of gigabyte tenants."
+  },
+  {
+    "id": "long-tail-800-r2",
+    "group": "Long tail cost",
+    "claim": "800 mostly idle projects, all in on R2",
+    "scenario": "fleet-800-idle",
+    "path": "cost.card=cloudflare-r2.total_usd_month",
+    "unit": "usd a month",
+    "compare": "",
+    "target": 0,
+    "earns": "context, the same fleet priced where requests and egress are cheaper"
   }
 ]

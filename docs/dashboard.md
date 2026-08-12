@@ -10,7 +10,7 @@ A claim nothing has measured yet says so instead of being left off, and a headli
 
 ## Where it stands
 
-4 of 5 claims met, 1 missed, 0 simulated, 0 not measured yet, and 4 numbers reported without a line.
+4 of 10 claims met, 1 missed, 0 simulated, 5 not measured yet, and 4 numbers reported without a line.
 
 ## Cold attach
 
@@ -34,11 +34,25 @@ The tail is reported without a line because neither milestone writes one, and it
 | Steady p99 at 200 rps, working set attached | no line | 1.298 ms | reported | zou-fleet-1000-warm on GamingPC | 2026-08-10 | zou#3 load test, 1000 small tenants with p99s |
 | Churn p99, drawing from all thousand | no line | 18240 ms | reported | zou-fleet-1000-warm on GamingPC | 2026-08-10 | zou#3 load test, attach churn |
 | Peak RSS of the whole tree, 100 attached | no line | 15.74 GB | reported | zou-fleet-1000-warm on GamingPC | 2026-08-10 | zou#3 load test, memory ceiling |
+| Tenants created a second, from empty | >= 100 per second |  | not measured |  |  | zou#31 create rate over 100 tenants a second sustained |
 
 The node is pinned to cpus 0-7 with taskset, so the eight cores are the deployment being measured and the traffic generator is not sharing them.
 Warmup has to outlast attaching the working set or the measured window is an attach storm rather than a steady state, which is why the row reads from the warm scenario and not from fleet-1000.
 Churn draws uniformly from ten times what the ceiling holds, so nearly every request pays for an attach plus the eviction making room for it, and today an attach is eager: it hydrates the database before the first row rather than faulting pages in as they are asked for.
 Reported rather than judged because the M1b memory line is written for 10,000 idle attached tenants under 16 GB and this run holds a hundred, so the two are not the same measurement, they are a decade apart on the same axis.
+Provisioning is read off the fleet that was built from nothing, because a resumed run creates a handful of tenants and reports the rate of those, which flatters the number by an order of magnitude.
+
+## Long tail cost
+
+| claim | line | measured | | where | when | earns |
+| --- | --- | ---: | --- | --- | --- | --- |
+| 800 mostly idle projects, all in on S3 standard | <= 90 usd a month |  | not measured |  |  | zou#31 Neon's own 800 mostly idle tenants scenario under 90 a month |
+| Per project, all in on S3 standard | no line |  | not measured |  |  | context for the row above, Neon models about 1.10 |
+| Per project, bytes only, S3 standard | no line |  | not measured |  |  | context for the M1b idle tenant line |
+| 800 mostly idle projects, all in on R2 | no line |  | not measured |  |  | context, the same fleet priced where requests and egress are cheaper |
+
+The dollars come from the hold phase only, because a month of this fleet is a month of nothing happening and pricing the steady and churn windows as if they ran all month would answer a question nobody asked.
+The M1b line for an idle tenant is written per gigabyte and these projects hold tens of megabytes each, so this number is on the page as the shape of the bill rather than as that line being earned, which needs a fleet of gigabyte tenants.
 
 ## Where the numbers came from
 
