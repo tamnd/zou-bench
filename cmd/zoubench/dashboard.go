@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/tamnd/zou-bench/dashboard"
 )
@@ -27,13 +28,8 @@ func cmdDashboard(argv []string) {
 	targetsPath := fs.String("targets", "docs/targets.json", "the claims and their lines")
 	bookPath := fs.String("book", "docs/dashboard.json", "readings, merged run by run and committed")
 	out := fs.String("out", "docs/dashboard.md", "the page")
-	var results []string
-	for _, a := range argv {
-		if len(a) > 0 && a[0] != '-' {
-			results = append(results, a)
-		}
-	}
-	fs.Parse(without(argv, results))
+	flags, results := splitDashboardArgs(argv)
+	fs.Parse(flags)
 
 	targets, err := dashboard.LoadTargets(*targetsPath)
 	die(err)
@@ -69,4 +65,30 @@ func cmdDashboard(argv []string) {
 	t := dashboard.Tally(targets, book)
 	fmt.Printf("%s: %d met, %d missed, %d simulated, %d not measured, %d reported\n",
 		*out, t[dashboard.Met], t[dashboard.Missed], t[dashboard.Simulated], t[dashboard.NotMeasured], t[dashboard.Reported])
+}
+
+// splitDashboardArgs separates the result files from the flags, so the
+// files can be given before the flags as well as after.
+//
+// Every flag this subcommand takes has a json or markdown path for a
+// value, which is the same shape a result file has, so a walk that only
+// asks whether an argument starts with a dash eats docs/targets.json as
+// a result and hands the flag package a -targets with nothing after it.
+// Skipping the value after a flag that takes one is the difference.
+func splitDashboardArgs(argv []string) (flags, results []string) {
+	takesValue := map[string]bool{"targets": true, "book": true, "out": true}
+	for i := 0; i < len(argv); i++ {
+		a := argv[i]
+		if !strings.HasPrefix(a, "-") {
+			results = append(results, a)
+			continue
+		}
+		flags = append(flags, a)
+		name := strings.TrimLeft(a, "-")
+		if !strings.Contains(a, "=") && takesValue[name] && i+1 < len(argv) {
+			i++
+			flags = append(flags, argv[i])
+		}
+	}
+	return flags, results
 }
