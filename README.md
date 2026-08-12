@@ -165,3 +165,28 @@ Paths are written without an api prefix and `--url` carries it, which is what le
 ## Results
 
 Result json files live under `results/`, curated tables under `docs/results/`, dated, with hardware and settings recorded in each file.
+
+## The dashboard
+
+`docs/dashboard.md` is the one page saying which published claims the benchmarks have actually earned, and it is generated rather than written.
+
+```
+zoubench dashboard [--targets docs/targets.json] [--book docs/dashboard.json] [--out docs/dashboard.md] [results...]
+```
+
+`docs/targets.json` is the list of claims.
+Each one names the scenario and optionally the label that can answer it, a dotted path into the result file, the unit the claim is written in, and which side of which line the number has to land on, along with the milestone line it earns by landing there.
+A path segment is a key, an array index, or `field=value`, which picks an element out of a list by name: `cost.card=aws-s3-standard.total_usd_month` reads the same card whatever order the price card flags were given in.
+`divide_by` converts what the result file stores into what the claim is written in, kilobytes into gigabytes and the like.
+
+A target with no `compare` is reported rather than judged.
+That is for the headline numbers no milestone has written a line under yet, and it is deliberate: a budget invented to make the table look finished is worse than a table that says which of its numbers are context.
+
+Runs happen on whichever machine can run them and the raw json stays out of git, so the readings are kept in `docs/dashboard.json`, merged one run at a time, and committed next to the page.
+Hand the command whatever result files the machine has, it updates their rows and leaves the rest alone, and the newest run of a scenario wins whatever order the files arrive in.
+Run it with no result files to re-render after editing the targets file, which is how a claim gets reworded or given a tighter line.
+The book stores each reading already converted into the claim's units, so changing `divide_by` on a target means handing that scenario's result file over again.
+
+A row is met when the measured number is on the right side of the line and nothing else counts.
+A run against a simulated store is never met whatever the number says, per the M1b rule that a simulated number only holds a place until a real bucket replaces it.
+A claim nothing has measured yet says so on the page instead of being left off it.

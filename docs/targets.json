@@ -1,0 +1,113 @@
+[
+  {
+    "id": "cold-attach-object-store-m3",
+    "group": "Cold attach",
+    "claim": "Attach to first row, against an object store",
+    "scenario": "cold-attach",
+    "label": "zou-minio-server3",
+    "path": "attach_ms.p50",
+    "unit": "ms",
+    "compare": "<=",
+    "target": 500,
+    "earns": "zou#3 exit gate, cold attach under 500 ms p50",
+    "note": "The two lines under the same reading are the two milestones asking for different things: M3 wants an object store attach under half a second and M1b wants ten times Neon's best case, which is 30 ms."
+  },
+  {
+    "id": "cold-attach-object-store-m1b",
+    "group": "Cold attach",
+    "claim": "Attach to first row, against an object store",
+    "scenario": "cold-attach",
+    "label": "zou-minio-server3",
+    "path": "attach_ms.p50",
+    "unit": "ms",
+    "compare": "<=",
+    "target": 30,
+    "earns": "zou#31 cold start, attach to first query, under 30 ms",
+    "note": "What separates the local number from the MinIO one is coordination round trips and not data, the same 3 manifest gets and 65 zero byte probes per cycle, paid mostly in series during boot, so the probe fan is where the object store row gets fixed."
+  },
+  {
+    "id": "cold-attach-localfs-m1b",
+    "group": "Cold attach",
+    "claim": "Attach to first row, against a local store",
+    "scenario": "cold-attach",
+    "label": "zou-localfs-gamingpc",
+    "path": "attach_ms.p50",
+    "unit": "ms",
+    "compare": "<=",
+    "target": 30,
+    "earns": "zou#31 cold start, attach to first query, under 30 ms"
+  },
+  {
+    "id": "cold-attach-object-store-p95",
+    "group": "Cold attach",
+    "claim": "Attach to first row at the tail, object store",
+    "scenario": "cold-attach",
+    "label": "zou-minio-server3",
+    "path": "attach_ms.p95",
+    "unit": "ms",
+    "compare": "",
+    "target": 0,
+    "earns": "context for the two rows above",
+    "note": "The tail is reported without a line because neither milestone writes one, and it is on the page because the median meets the M3 gate while the p95 does not, which is the sort of thing a median alone hides."
+  },
+  {
+    "id": "density-tenants",
+    "group": "Density",
+    "claim": "Small tenants on one 8 vCPU node",
+    "scenario": "fleet-1000-warm",
+    "path": "tenants_ready",
+    "unit": "tenants",
+    "compare": ">=",
+    "target": 1000,
+    "earns": "zou#3 exit gate, 1000 small tenants on one 8 vCPU node",
+    "note": "The node is pinned to cpus 0-7 with taskset, so the eight cores are the deployment being measured and the traffic generator is not sharing them."
+  },
+  {
+    "id": "density-steady-errors",
+    "group": "Density",
+    "claim": "Failed requests in the steady window",
+    "scenario": "fleet-1000-warm",
+    "path": "steady.errors",
+    "unit": "requests",
+    "compare": "<=",
+    "target": 0,
+    "earns": "zou#3 load test, 1000 small tenants with p99s",
+    "note": "Warmup has to outlast attaching the working set or the measured window is an attach storm rather than a steady state, which is why the row reads from the warm scenario and not from fleet-1000."
+  },
+  {
+    "id": "density-steady-p99",
+    "group": "Density",
+    "claim": "Steady p99 at 200 rps, working set attached",
+    "scenario": "fleet-1000-warm",
+    "path": "steady.latency_ms.p99",
+    "unit": "ms",
+    "compare": "",
+    "target": 0,
+    "earns": "zou#3 load test, 1000 small tenants with p99s"
+  },
+  {
+    "id": "density-churn-p99",
+    "group": "Density",
+    "claim": "Churn p99, drawing from all thousand",
+    "scenario": "fleet-1000-warm",
+    "path": "churn.latency_ms.p99",
+    "unit": "ms",
+    "compare": "",
+    "target": 0,
+    "earns": "zou#3 load test, attach churn",
+    "note": "Churn draws uniformly from ten times what the ceiling holds, so nearly every request pays for an attach plus the eviction making room for it, and today an attach is eager: it hydrates the database before the first row rather than faulting pages in as they are asked for."
+  },
+  {
+    "id": "density-rss-peak",
+    "group": "Density",
+    "claim": "Peak RSS of the whole tree, 100 attached",
+    "scenario": "fleet-1000-warm",
+    "path": "process.rss_peak_kb",
+    "divide_by": 1000000,
+    "unit": "GB",
+    "compare": "",
+    "target": 0,
+    "earns": "zou#3 load test, memory ceiling",
+    "note": "Reported rather than judged because the M1b memory line is written for 10,000 idle attached tenants under 16 GB and this run holds a hundred, so the two are not the same measurement, they are a decade apart on the same axis."
+  }
+]
