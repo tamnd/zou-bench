@@ -139,3 +139,34 @@ func TestReportCarriesReadTiers(t *testing.T) {
 		t.Fatal("empty tier reported")
 	}
 }
+
+// A run has to be able to answer where the page service time went,
+// otherwise a slow socket and a serve loop stuck in ingest look the
+// same from outside.
+func TestReportCarriesPageServicePhases(t *testing.T) {
+	c, err := Read(write(t, func(c *Counters) {
+		c[phaseSlot(0)] = 12       // park
+		c[phaseSlot(0)+1+16] = 12  // 64 to 128 ms
+		c[phaseSlot(1)] = 500      // read
+		c[phaseSlot(1)+1+7] = 500  // inside 256 us
+		c[phaseSlot(2)] = 300      // ingest
+		c[phaseSlot(2)+1+12] = 300 // 4 to 8 ms
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, ok := Report(c)["pagesvc"].(map[string]any)
+	if !ok {
+		t.Fatal("no pagesvc block")
+	}
+	park := svc["park"].(map[string]any)
+	if park["calls"].(uint64) != 12 || park["p50_us"].(uint64) != 131072 {
+		t.Fatalf("park phase wrong: %v", park)
+	}
+	if p50 := svc["read"].(map[string]any)["p50_us"].(uint64); p50 != 256 {
+		t.Fatalf("read p50 %d", p50)
+	}
+	if p50 := svc["ingest"].(map[string]any)["p50_us"].(uint64); p50 != 8192 {
+		t.Fatalf("ingest p50 %d", p50)
+	}
+}
