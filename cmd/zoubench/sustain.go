@@ -184,6 +184,10 @@ func cmdSustain(argv []string) {
 				overs = append(overs, over)
 				overMu.Unlock()
 			})
+		if sc.GCSecs > 0 {
+			go gcLoop(*zoubin, *store, time.Duration(sc.GCSecs)*time.Second,
+				sc.GCRetention, sc.GCWindow, stopTick)
+		}
 
 		// -n matters: a plain pgbench run truncates pgbench_history
 		// before starting, which would wipe the very rows the balance
@@ -304,6 +308,14 @@ func cmdSustain(argv []string) {
 				seg["rss_slope_kb_per_min"] = v
 			}
 		}
+		// What the store costs on disk, segment by segment. The soak
+		// already reports amplification per shard, which is about the
+		// overlay and says nothing about history that was never
+		// collected, so a run can sit inside its amp bound the whole
+		// way and still end on a full disk.
+		if b, ok := storeBytes(*store); ok {
+			seg["store_bytes"] = b
+		}
 		segments = append(segments, seg)
 	}
 
@@ -330,13 +342,22 @@ func cmdSustain(argv []string) {
 		result["tps_mean"] = round1(sum / float64(len(tpsVals)))
 	}
 
-	die(os.MkdirAll(*outdir, 0o755))
 	stamp := strings.NewReplacer(":", "", "-", "").Replace(result["date"].(string))[:15]
-	path := filepath.Join(*outdir, fmt.Sprintf("%s-%s-%s.json", sc.Name, *label, stamp))
+	name := fmt.Sprintf("%s-%s-%s.json", sc.Name, *label, stamp)
 	out, err := json.MarshalIndent(result, "", "  ")
 	die(err)
-	die(os.WriteFile(path, out, 0o644))
-	fmt.Println(path)
+	// Hours of soak come down to this one document, so a disk that
+	// filled up somewhere in hour six must not be what decides whether
+	// the run happened. Failing to save it is worth an exit code, but
+	// only after the numbers themselves are on stdout, where the log
+	// the harness was started under already catches them.
+	path, saveErr := writeResult(*outdir, name, out)
+	if saveErr != nil {
+		fmt.Fprintf(os.Stderr, "zoubench: %v, the result follows on stdout\n", saveErr)
+		fmt.Println(string(out))
+	} else {
+		fmt.Println(path)
+	}
 
 	brief := map[string]any{}
 	for k, v := range result {
@@ -348,6 +369,70 @@ func cmdSustain(argv []string) {
 	}
 	pretty, _ := json.MarshalIndent(brief, "", "  ")
 	fmt.Println(string(pretty))
+	if saveErr != nil {
+		os.Exit(1)
+	}
+}
+
+// writeResult saves the run, preferring outdir and falling back to the
+// temp dir when that disk has nothing left. The write goes to a temp
+// name and gets renamed, because a half written file under the name a
+// collector globs for reads as a run that finished, and the way this
+// fails is a full disk, which is exactly when a zero byte file appears.
+func writeResult(outdir, name string, out []byte) (string, error) {
+	first := filepath.Join(outdir, name)
+	err := writeFileAtomic(first, out)
+	if err == nil {
+		return first, nil
+	}
+	fallback := filepath.Join(os.TempDir(), name)
+	if err2 := writeFileAtomic(fallback, out); err2 == nil {
+		fmt.Fprintf(os.Stderr, "zoubench: %v, saved to %s instead\n", err, fallback)
+		return fallback, nil
+	}
+	return "", err
+}
+
+func writeFileAtomic(path string, out []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".part"
+	if err := os.WriteFile(tmp, out, 0o644); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// storeBytes measures a store that lives on this filesystem. A target
+// naming a bucket has no answer here and says so, rather than reporting
+// a zero somebody would read as a store that costs nothing.
+func storeBytes(target string) (int64, bool) {
+	if st, err := os.Stat(target); err != nil || !st.IsDir() {
+		return 0, false
+	}
+	var total int64
+	err := filepath.WalkDir(target, func(_ string, d os.DirEntry, err error) error {
+		// A sweep or a fold can delete a file between the walk listing
+		// it and the stat, and a soak measurement is not worth failing
+		// over one of those.
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, false
+	}
+	return total, true
 }
 
 // devNode is one zou dev supervisor the harness started, with the
@@ -621,6 +706,39 @@ func compactLoop(zoubin, store string, every time.Duration, start time.Time, sto
 		}
 		amp, over := sustain.MaxAmp(shards)
 		record(round1(time.Since(start).Seconds()), round3(amp), over)
+	}
+}
+
+// gcLoop drives collection the way compactLoop drives compaction:
+// nothing else on a zou dev node deletes what a fold superseded, so
+// without this a soak keeps every checkpoint and every sealed segment
+// it ever wrote. That is not a store measurement, it is a disk filling
+// up, and the run it kills is always one of the long ones.
+//
+// The windows come from the scenario because they are policy, not
+// tuning. Collection needs two passes over a key by construction, one
+// to stamp it and a later one to delete it, so the cadence has to be
+// short relative to the run or nothing is ever collected. Errors are
+// dropped for the same reason the other loops drop them: a sweep that
+// lands during a drill finds a store nobody is holding, and refusing
+// to run because another sweep holds the lock is the lock working.
+func gcLoop(zoubin, store string, every time.Duration, retention, window string, stop chan struct{}) {
+	args := []string{"gc", store}
+	if retention != "" {
+		args = append(args, "--retention", retention)
+	}
+	if window != "" {
+		args = append(args, "--window", window)
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+		}
+		exec.Command(zoubin, args...).Run()
 	}
 }
 
