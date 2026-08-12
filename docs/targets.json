@@ -147,16 +147,50 @@
     "earns": "context for the row above, Neon models about 1.10"
   },
   {
-    "id": "long-tail-800-store-per-project",
+    "id": "long-tail-800-bytes",
     "group": "Long tail cost",
-    "claim": "Per project, bytes only, S3 standard",
+    "claim": "The bytes for all 800, S3 standard",
     "scenario": "fleet-800-idle",
-    "path": "cost.card=aws-s3-standard.store_usd_per_project_month",
+    "path": "cost.card=aws-s3-standard.storage_usd_month",
     "unit": "usd a month",
     "compare": "",
     "target": 0,
-    "earns": "context for the M1b idle tenant line",
+    "earns": "context, the half of the bill that is data at rest",
     "note": "The M1b line for an idle tenant is written per gigabyte and these projects hold tens of megabytes each, so this number is on the page as the shape of the bill rather than as that line being earned, which needs a fleet of gigabyte tenants."
+  },
+  {
+    "id": "long-tail-800-requests",
+    "group": "Long tail cost",
+    "claim": "The requests for all 800, S3 standard",
+    "scenario": "fleet-800-idle",
+    "path": "cost.card=aws-s3-standard.ops_usd_month",
+    "unit": "usd a month",
+    "compare": "",
+    "target": 0,
+    "earns": "context, the other half, which is all of it"
+  },
+  {
+    "id": "long-tail-dormant-puts",
+    "group": "Long tail cost",
+    "claim": "Puts an hour by a project nobody is using, dormant",
+    "scenario": "fleet-800-idle",
+    "path": "hold.rates.dormant_ops_per_hour.puts",
+    "unit": "puts an hour",
+    "compare": "",
+    "target": 0,
+    "earns": "context, what scale to zero is worth"
+  },
+  {
+    "id": "long-tail-attached-puts",
+    "group": "Long tail cost",
+    "claim": "Puts an hour by a project nobody is using, attached",
+    "scenario": "fleet-800-idle",
+    "path": "hold.rates.attached_ops_per_project_hour.puts",
+    "unit": "puts an hour",
+    "compare": "",
+    "target": 0,
+    "earns": "context, and the whole of the row above it",
+    "note": "A dormant project costs nothing at all, so every dollar on this page is written by the hundred that stay attached, each of them putting an object every five seconds with nobody asking it for anything. That rate is the thing to fix, not the price card."
   },
   {
     "id": "long-tail-800-r2",
