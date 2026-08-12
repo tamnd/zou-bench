@@ -1,5 +1,12 @@
 {
   "readings": {
+    "cold-attach-localfs-m1b": {
+      "value": 20.524,
+      "label": "zou-localfs-gamingpc",
+      "host": "GamingPC",
+      "date": "2026-08-06T18:26:41Z",
+      "source": "cold-attach-zou-localfs-gamingpc-20260806T182641.json"
+    },
     "cold-attach-object-store-m1b": {
       "value": 245.736,
       "label": "zou-minio-server3",

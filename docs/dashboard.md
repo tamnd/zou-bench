@@ -10,7 +10,7 @@ A claim nothing has measured yet says so instead of being left off, and a headli
 
 ## Where it stands
 
-3 of 5 claims met, 1 missed, 0 simulated, 1 not measured yet, and 4 numbers reported without a line.
+4 of 5 claims met, 1 missed, 0 simulated, 0 not measured yet, and 4 numbers reported without a line.
 
 ## Cold attach
 
@@ -18,7 +18,7 @@ A claim nothing has measured yet says so instead of being left off, and a headli
 | --- | --- | ---: | --- | --- | --- | --- |
 | Attach to first row, against an object store | <= 500 ms | 245.7 ms | met | zou-minio-server3 on vmi3391933 | 2026-08-06 | zou#3 exit gate, cold attach under 500 ms p50 |
 | Attach to first row, against an object store | <= 30 ms | 245.7 ms | missed | zou-minio-server3 on vmi3391933 | 2026-08-06 | zou#31 cold start, attach to first query, under 30 ms |
-| Attach to first row, against a local store | <= 30 ms |  | not measured |  |  | zou#31 cold start, attach to first query, under 30 ms |
+| Attach to first row, against a local store | <= 30 ms | 20.52 ms | met | zou-localfs-gamingpc on GamingPC | 2026-08-06 | zou#31 cold start, attach to first query, under 30 ms |
 | Attach to first row at the tail, object store | no line | 501.1 ms | reported | zou-minio-server3 on vmi3391933 | 2026-08-06 | context for the two rows above |
 
 The two lines under the same reading are the two milestones asking for different things: M3 wants an object store attach under half a second and M1b wants ten times Neon's best case, which is 30 ms.
@@ -42,5 +42,6 @@ Reported rather than judged because the M1b memory line is written for 10,000 id
 
 ## Where the numbers came from
 
+- `cold-attach-zou-localfs-gamingpc-20260806T182641.json`
 - `cold-attach-zou-minio-server3-20260806T215955.json`
 - `fleet-1000-warm-zou-fleet-1000-warm-20260810T174813.json`
