@@ -9,5 +9,8 @@
   "drills": ["pusher", "crash", "death"],
   "checkpoint_secs": 30,
   "compact_secs": 60,
+  "gc_secs": 60,
+  "gc_retention": "2m",
+  "gc_window": "30s",
   "port": 5497
 }

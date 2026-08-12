@@ -61,6 +61,17 @@ type Scenario struct {
 	Drills         []string `json:"drills"`
 	CheckpointSecs int      `json:"checkpoint_secs"`
 	CompactSecs    int      `json:"compact_secs"`
+	// GCSecs, GCRetention and GCWindow drive the collection sweep, off
+	// when the cadence is zero. A store only grows on its own, so a
+	// soak long enough to be interesting is also long enough to fill
+	// the disk with history nobody asked to keep: a 6 hour run at
+	// scale 100 left 49 GB behind for a 1.6 GB database. The two
+	// windows are short here on purpose. Retention is the promise
+	// point in time recovery has to keep, and a benchmark store makes
+	// no such promise past the run it is in.
+	GCSecs      int    `json:"gc_secs"`
+	GCRetention string `json:"gc_retention"`
+	GCWindow    string `json:"gc_window"`
 	// ServerSideInit generates pgbench rows inside the server instead
 	// of streaming them from the client. Same data, but a big scale
 	// initializes in a fraction of the time, which matters when the

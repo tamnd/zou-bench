@@ -13,6 +13,9 @@
   ],
   "checkpoint_secs": 60,
   "compact_secs": 120,
+  "gc_secs": 300,
+  "gc_retention": "10m",
+  "gc_window": "2m",
   "port": 5497,
   "server_side_init": true
 }
