@@ -139,6 +139,18 @@ func cmdSustain(argv []string) {
 	// in the middle of loading a thousand warehouses.
 	_, err = soakQuery(addr, pguser, "checkpoint")
 	dieDown(err)
+	// Collection has to cover the load as well, not just the segments.
+	// The node folds on its own timer while pgbench is loading, every
+	// fold retires the layers it read, and nothing deletes them unless
+	// something is sweeping. A scale 500 load on server3 ran for an
+	// hour before the first segment started and left 128 retired fold
+	// outputs behind it, the last of them 1.2 GB, 18 GB of shards for
+	// a database of 7.5 GB, and the disk went before the soak began.
+	stopLoad := make(chan struct{})
+	if sc.GCSecs > 0 {
+		go gcLoop(*zoubin, *store, time.Duration(sc.GCSecs)*time.Second,
+			sc.GCRetention, sc.GCWindow, stopLoad)
+	}
 	tInit := time.Now()
 	initArgs := []string{"-i", "-q", "-s", strconv.Itoa(sc.Scale)}
 	if sc.ServerSideInit {
@@ -148,6 +160,7 @@ func cmdSustain(argv []string) {
 		append(initArgs, connArgs...)...)
 	init.Stdout, init.Stderr = os.Stderr, os.Stderr
 	dieDown(init.Run())
+	close(stopLoad)
 	result["init_seconds"] = round1(time.Since(tInit).Seconds())
 	_, err = soakQuery(addr, pguser, "create table if not exists zoubench_ledger(id bigint primary key)")
 	dieDown(err)
