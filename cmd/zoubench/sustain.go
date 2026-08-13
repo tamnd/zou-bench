@@ -67,6 +67,15 @@ func cmdSustain(argv []string) {
 	pguser := "postgres"
 
 	die(os.MkdirAll(*workdir, 0o755))
+	// The workdir belongs to one soak at a time. A second run started
+	// against the same one shares its store, its port and its runtime
+	// tree, and the two sets of compactions, gc passes and kill drills
+	// ruin each other's numbers quietly. The lock is held by the
+	// package variable for the life of the process, an os.File that
+	// nothing keeps a reference to gets closed by the finalizer.
+	lock, err := lockWorkdir(*workdir)
+	die(err)
+	workdirLock = lock
 	// One counter file for the whole soak. The counters reset with
 	// every store boot and Diff refuses shrunken counters, so the
 	// harness snapshots per segment and drops the segments a kill
@@ -327,6 +336,18 @@ func cmdSustain(argv []string) {
 			seg["store_bytes"] = b
 		}
 		segments = append(segments, seg)
+
+		// A node that is gone here is one no drill is going to bring
+		// back, since the death drill starts its replacement before
+		// this point. Carrying on would spend the remaining hours
+		// recording refused connections while the checkpoint, compact
+		// and gc loops kept working a store nothing is writing, so the
+		// soak stops and says why.
+		if !dev.alive() {
+			result["stopped_early"] = "the zou dev supervisor exited outside a drill"
+			fmt.Fprintf(os.Stderr, "zoubench: the node is gone after segment %d, stopping the soak\n", seq)
+			break
+		}
 	}
 
 	close(stopLedger)
@@ -451,7 +472,13 @@ func storeBytes(target string) (int64, bool) {
 type devNode struct {
 	cmd     *exec.Cmd
 	runtime string
+	// gone closes once the supervisor has exited and been reaped.
+	gone chan struct{}
 }
+
+// workdirLock holds the soak's claim on its workdir. It is a package
+// variable so the descriptor stays open for the life of the process.
+var workdirLock *os.File
 
 // startDev launches one zou dev over the store. stealLease is set
 // only for the node started after a death drill, when the harness
@@ -474,7 +501,29 @@ func startDev(zoubin, store, pgbin string, port int, rtdir, logPath, statsPath s
 	if err != nil {
 		return nil, err
 	}
-	return &devNode{cmd: cmd, runtime: rtdir}, nil
+	d := &devNode{cmd: cmd, runtime: rtdir, gone: make(chan struct{})}
+	// One reaper per node. A supervisor that dies on its own is
+	// noticed here instead of sitting as a zombie nobody looks at,
+	// and killNode waits on the channel rather than calling Wait
+	// itself, because two Waits on one command race each other.
+	go func() {
+		d.cmd.Wait()
+		close(d.gone)
+	}()
+	return d, nil
+}
+
+// alive reports whether the supervisor is still running. A node that
+// went down outside a drill takes the rest of the soak with it: the
+// port stops answering and every later segment measures a refused
+// connection rather than a store.
+func (d *devNode) alive() bool {
+	select {
+	case <-d.gone:
+		return false
+	default:
+		return true
+	}
 }
 
 // killNode takes the whole node down the hard way: the supervisor
@@ -487,7 +536,7 @@ func (d *devNode) killNode() {
 		sigkill(d.cmd.Process.Pid)
 	}
 	exec.Command("pkill", "-9", "-f", d.runtime).Run()
-	d.cmd.Wait()
+	<-d.gone
 	reapSHM()
 }
 
