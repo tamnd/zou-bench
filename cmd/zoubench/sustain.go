@@ -156,10 +156,17 @@ func cmdSustain(argv []string) {
 		folds = append(folds, sample)
 		foldMu.Unlock()
 	}
+	var gcMu sync.Mutex
+	var sweeps []map[string]any
+	recordSweep := func(sample map[string]any) {
+		gcMu.Lock()
+		sweeps = append(sweeps, sample)
+		gcMu.Unlock()
+	}
 	stopLoad := make(chan struct{})
 	if sc.GCSecs > 0 {
 		go gcLoop(*zoubin, *store, time.Duration(sc.GCSecs)*time.Second,
-			sc.GCRetention, sc.GCWindow, stopLoad)
+			sc.GCRetention, sc.GCWindow, runStart, stopLoad, recordSweep)
 	}
 	if sc.FoldSecs > 0 {
 		go foldLoop(*zoubin, *store, *pgbin, sc.GCRetention,
@@ -222,7 +229,7 @@ func cmdSustain(argv []string) {
 			})
 		if sc.GCSecs > 0 {
 			go gcLoop(*zoubin, *store, time.Duration(sc.GCSecs)*time.Second,
-				sc.GCRetention, sc.GCWindow, stopTick)
+				sc.GCRetention, sc.GCWindow, runStart, stopTick, recordSweep)
 		}
 		if sc.FoldSecs > 0 {
 			go foldLoop(*zoubin, *store, *pgbin, sc.GCRetention,
@@ -411,6 +418,19 @@ func cmdSustain(argv []string) {
 		result["fold_layers_retired"] = retired
 	}
 	foldMu.Unlock()
+	gcMu.Lock()
+	if len(sweeps) > 0 {
+		result["gc"] = sweeps
+		// How many objects the run actually collected, which is the
+		// number that says whether the store held because collection
+		// worked or because nothing ever grew.
+		deleted := 0
+		for _, s := range sweeps {
+			deleted += s["deleted"].(int)
+		}
+		result["gc_deleted"] = deleted
+	}
+	gcMu.Unlock()
 	result["violations"] = violations
 	if len(tpsVals) > 0 {
 		sum := 0.0
@@ -828,7 +848,13 @@ func compactLoop(zoubin, store string, every time.Duration, start time.Time, sto
 // dropped for the same reason the other loops drop them: a sweep that
 // lands during a drill finds a store nobody is holding, and refusing
 // to run because another sweep holds the lock is the lock working.
-func gcLoop(zoubin, store string, every time.Duration, retention, window string, stop chan struct{}) {
+//
+// Each sweep records what it did, the same way foldLoop does, because
+// a sweep deleting objects is the one loop here that can lose data if
+// it is wrong. Reconstructing that from the store afterwards means
+// reading mtimes off whatever survived, which is how zou #388 was
+// eventually found and is not a thing a soak should ask of anybody.
+func gcLoop(zoubin, store string, every time.Duration, retention, window string, start time.Time, stop chan struct{}, record func(sample map[string]any)) {
 	args := []string{"gc", store}
 	if retention != "" {
 		args = append(args, "--retention", retention)
@@ -844,7 +870,22 @@ func gcLoop(zoubin, store string, every time.Duration, retention, window string,
 			return
 		case <-t.C:
 		}
-		exec.Command(zoubin, args...).Run()
+		tSweep := time.Now()
+		out, err := exec.Command(zoubin, args...).Output()
+		if err != nil {
+			continue
+		}
+		sum, err := sustain.ParseGcSummary(out)
+		if err != nil {
+			continue
+		}
+		record(map[string]any{
+			"t":          round1(time.Since(start).Seconds()),
+			"seconds":    round1(time.Since(tSweep).Seconds()),
+			"tenants":    sum.Tenants,
+			"deleted":    sum.Deleted,
+			"candidates": sum.Candidates,
+		})
 	}
 }
 
