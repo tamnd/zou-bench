@@ -188,3 +188,44 @@ func TestParseFoldReportRefusesNoise(t *testing.T) {
 		}
 	}
 }
+
+func TestParseGcSummaryReadsWhatTheSweepDid(t *testing.T) {
+	sum, err := ParseGcSummary([]byte("3 tenants, deleted 128 objects, 64 waiting out the 2m window\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if sum.Tenants != 3 || sum.Deleted != 128 || sum.Candidates != 64 {
+		t.Fatalf("got %+v", sum)
+	}
+}
+
+func TestParseGcSummaryReadsADryRunPastItsOwnKeys(t *testing.T) {
+	raw := []byte(`would delete pg/1/2/3/0/000000010000abcd
+would delete t/shard/0001/i-0000-0001-000000010000abcd.il
+1 tenants, would delete 2 objects, 0 waiting out the 24h window
+`)
+	sum, err := ParseGcSummary(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	// The count is the summary's, not the number of lines above it:
+	// a dry run prints one line per doomed key and the words in the
+	// summary shift along by one when "deleted" becomes "would delete".
+	if sum.Deleted != 2 || sum.Tenants != 1 || sum.Candidates != 0 {
+		t.Fatalf("got %+v", sum)
+	}
+}
+
+func TestParseGcSummaryRefusesAnythingElse(t *testing.T) {
+	for _, raw := range []string{
+		"",
+		"a sweep is already running, held by gc-1 until unix 176",
+		"3 tenants, deleted lots of objects, 64 waiting out the 2m window",
+		"checkpoint starting: time",
+		`{"horizon":"0/0","shards":[]}`,
+	} {
+		if sum, err := ParseGcSummary([]byte(raw)); err == nil {
+			t.Fatalf("%q parsed as %+v", raw, sum)
+		}
+	}
+}

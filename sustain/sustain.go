@@ -8,6 +8,8 @@ package sustain
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/tamnd/zou-bench/latency"
@@ -237,4 +239,71 @@ func (r FoldReport) FoldTotals() (before, after int64, retired int) {
 		retired += s.Retired
 	}
 	return before, after, retired
+}
+
+// GcSummary is one collection sweep, read back off the line zou gc
+// prints when it is done: so many tenants pinned, so many objects
+// deleted, so many stamped and waiting out the safety window.
+//
+// Deleting takes two sweeps by construction, one to stamp a key and a
+// later one to delete it if it is still garbage, so the two counts
+// belong to different sweeps: Candidates is what this run stamped and
+// Deleted is what an earlier run stamped and this one still found
+// unreferenced. A soak that keeps only the totals cannot tell a store
+// that collected nothing from one that never ran a sweep, and the
+// missing layer hunt in zou #388 was a day of reading mtimes because
+// the sweeps left no record of themselves at all.
+type GcSummary struct {
+	Tenants    int
+	Deleted    int
+	Candidates int
+}
+
+// ParseGcSummary reads that line off the end of a sweep's output. A
+// dry run prints a would-delete line per doomed key first, so the
+// summary is the last line rather than the only one, and it is the
+// last line that has to parse: noise anywhere above it is somebody
+// else's log, noise where the summary should be is a sweep whose
+// outcome nobody knows.
+func ParseGcSummary(raw []byte) (GcSummary, error) {
+	line := ""
+	for _, l := range strings.Split(string(raw), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			line = l
+		}
+	}
+	f := strings.Fields(line)
+	if len(f) < 6 || f[len(f)-1] != "window" {
+		return GcSummary{}, fmt.Errorf("gc summary: %q is not a sweep summary", line)
+	}
+	var s GcSummary
+	var err error
+	if s.Tenants, err = countBefore(f, "tenants,"); err != nil {
+		return GcSummary{}, err
+	}
+	if s.Deleted, err = countBefore(f, "objects,"); err != nil {
+		return GcSummary{}, err
+	}
+	if s.Candidates, err = countBefore(f, "waiting"); err != nil {
+		return GcSummary{}, err
+	}
+	return s, nil
+}
+
+// countBefore reads the number sitting in front of a word, which is
+// how every count in that line is written. Going by the word rather
+// than by position is what lets the same parser read a real sweep and
+// a dry run, where "deleted" becomes "would delete" and everything
+// after it shifts along by one.
+func countBefore(fields []string, word string) (int, error) {
+	for i, f := range fields {
+		if f == word && i > 0 {
+			n, err := strconv.Atoi(strings.TrimSuffix(fields[i-1], ","))
+			if err != nil {
+				return 0, fmt.Errorf("gc summary: %q before %q is not a number", fields[i-1], word)
+			}
+			return n, nil
+		}
+	}
+	return 0, fmt.Errorf("gc summary: nothing before %q", word)
 }
