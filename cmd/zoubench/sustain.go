@@ -896,6 +896,7 @@ func foldLoop(zoubin, store, pgbin, retention string, every time.Duration, start
 			"t":            round1(time.Since(start).Seconds()),
 			"seconds":      round1(time.Since(tFold).Seconds()),
 			"horizon":      rep.Horizon,
+			"checksums":    rep.DataChecksums,
 			"shards":       len(rep.Shards),
 			"retired":      retired,
 			"bytes_before": before,
