@@ -200,8 +200,13 @@ type FoldShard struct {
 // empty when no shard had anything below the horizon, which is the
 // ordinary answer on a young store and not a failure.
 type FoldReport struct {
-	Horizon string      `json:"horizon"`
-	Shards  []FoldShard `json:"shards"`
+	Horizon string `json:"horizon"`
+	// What the fold believed about data checksums. It reads the
+	// setting off the store, and a fold that got it wrong writes
+	// pages the cluster refuses on the next read, so the belief is
+	// worth keeping next to the run it wrote.
+	DataChecksums bool        `json:"data_checksums"`
+	Shards        []FoldShard `json:"shards"`
 }
 
 // ParseFoldReport decodes the --horizon --json object. Anything that

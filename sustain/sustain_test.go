@@ -141,7 +141,7 @@ func TestDrillCarriesWhyACheckCouldNotRun(t *testing.T) {
 }
 
 func TestParseFoldReportReadsWhatTheFoldDid(t *testing.T) {
-	raw := []byte(`{"horizon":"0/8B000000","shards":[` +
+	raw := []byte(`{"horizon":"0/8B000000","data_checksums":true,"shards":[` +
 		`{"shard":0,"horizon":"0/8B000000","retired":12,"outputs":2,"imaged":3400,"unbased":1,"pinned":1,"bytes_before":136770905,"bytes_after":8715593},` +
 		`{"shard":1,"horizon":"0/8B000000","retired":3,"outputs":1,"imaged":900,"unbased":0,"pinned":0,"bytes_before":2000,"bytes_after":500}]}`)
 	rep, err := ParseFoldReport(raw)
@@ -150,6 +150,9 @@ func TestParseFoldReportReadsWhatTheFoldDid(t *testing.T) {
 	}
 	if rep.Horizon != "0/8B000000" {
 		t.Fatalf("horizon %q", rep.Horizon)
+	}
+	if !rep.DataChecksums {
+		t.Fatal("the fold said checksums were on and the report dropped it")
 	}
 	if len(rep.Shards) != 2 {
 		t.Fatalf("shards %d", len(rep.Shards))
