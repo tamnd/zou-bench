@@ -1,0 +1,22 @@
+{
+  "name": "sustain-24h-s500-capped",
+  "kind": "sustain",
+  "scale": 500,
+  "clients": 8,
+  "threads": 8,
+  "rate": 200,
+  "duration": 86400,
+  "segment": 1800,
+  "drills": [
+    "pusher",
+    "crash",
+    "death"
+  ],
+  "checkpoint_secs": 60,
+  "compact_secs": 120,
+  "gc_secs": 300,
+  "gc_retention": "10m",
+  "gc_window": "2m",
+  "port": 5497,
+  "server_side_init": true
+}
