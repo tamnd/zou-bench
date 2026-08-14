@@ -12,5 +12,6 @@
   "gc_secs": 60,
   "gc_retention": "2m",
   "gc_window": "30s",
+  "fold_secs": 120,
   "port": 5497
 }

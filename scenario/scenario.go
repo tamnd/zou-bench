@@ -72,6 +72,18 @@ type Scenario struct {
 	GCSecs      int    `json:"gc_secs"`
 	GCRetention string `json:"gc_retention"`
 	GCWindow    string `json:"gc_window"`
+	// FoldSecs drives the merge fold, off when zero. Collection only
+	// deletes what a compaction sweep retired, and an ordinary sweep
+	// retires nothing below the newest image: an old image is the base
+	// some read under it needs and every record the tenant wrote sits
+	// in some delta, so the page layers grow with the write volume of
+	// the run and nothing ever brings them down. The fold is what buys
+	// the right to drop them, and it folds no higher than the oldest
+	// lsn a checkpoint inside GCRetention still names, so the two
+	// cadences are one policy read twice. It is expensive by design,
+	// so this belongs in the minutes, not in the seconds the sweep
+	// runs on.
+	FoldSecs int `json:"fold_secs"`
 	// ServerSideInit generates pgbench rows inside the server instead
 	// of streaming them from the client. Same data, but a big scale
 	// initializes in a fraction of the time, which matters when the
