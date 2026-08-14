@@ -178,3 +178,58 @@ func (l *Ledger) Chunks(size int) [][]int64 {
 	}
 	return out
 }
+
+// FoldShard is one shard's outcome from a merge fold, decoded from
+// zou compact --horizon --json. BytesBefore and BytesAfter are the
+// shard's whole layer footprint either side of the cut, not the bytes
+// the pass touched, so a soak can plot the thing the fold exists to
+// hold down.
+type FoldShard struct {
+	Shard       int    `json:"shard"`
+	Horizon     string `json:"horizon"`
+	Retired     int    `json:"retired"`
+	Outputs     int    `json:"outputs"`
+	Imaged      int    `json:"imaged"`
+	Unbased     int    `json:"unbased"`
+	Pinned      int    `json:"pinned"`
+	BytesBefore int64  `json:"bytes_before"`
+	BytesAfter  int64  `json:"bytes_after"`
+}
+
+// FoldReport is one fold across every shard of a tenant. Shards is
+// empty when no shard had anything below the horizon, which is the
+// ordinary answer on a young store and not a failure.
+type FoldReport struct {
+	Horizon string      `json:"horizon"`
+	Shards  []FoldShard `json:"shards"`
+}
+
+// ParseFoldReport decodes the --horizon --json object. Anything that
+// is not the object is an error rather than an empty report, for the
+// same reason a garbage status sample is: a fold recorded from noise
+// would read as a fold that ran and found nothing to do, which is the
+// one outcome that looks identical to a healthy store.
+func ParseFoldReport(raw []byte) (FoldReport, error) {
+	var rep FoldReport
+	if err := json.Unmarshal(raw, &rep); err != nil {
+		return FoldReport{}, fmt.Errorf("fold report: %w", err)
+	}
+	if rep.Horizon == "" {
+		return FoldReport{}, fmt.Errorf("fold report: no horizon")
+	}
+	return rep, nil
+}
+
+// FoldTotals reduces one report to the numbers a timeline sample
+// carries: the footprint either side of the fold summed over every
+// shard that moved, and how many layers went away to get there. A
+// report with no shards sums to zeros, which is the honest reading of
+// a fold that was allowed to cut nowhere.
+func (r FoldReport) FoldTotals() (before, after int64, retired int) {
+	for _, s := range r.Shards {
+		before += s.BytesBefore
+		after += s.BytesAfter
+		retired += s.Retired
+	}
+	return before, after, retired
+}

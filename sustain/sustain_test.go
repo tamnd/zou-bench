@@ -139,3 +139,49 @@ func TestDrillCarriesWhyACheckCouldNotRun(t *testing.T) {
 		t.Fatalf("a drill whose checks ran carries no error: %s", clean)
 	}
 }
+
+func TestParseFoldReportReadsWhatTheFoldDid(t *testing.T) {
+	raw := []byte(`{"horizon":"0/8B000000","shards":[` +
+		`{"shard":0,"horizon":"0/8B000000","retired":12,"outputs":2,"imaged":3400,"unbased":1,"pinned":1,"bytes_before":136770905,"bytes_after":8715593},` +
+		`{"shard":1,"horizon":"0/8B000000","retired":3,"outputs":1,"imaged":900,"unbased":0,"pinned":0,"bytes_before":2000,"bytes_after":500}]}`)
+	rep, err := ParseFoldReport(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Horizon != "0/8B000000" {
+		t.Fatalf("horizon %q", rep.Horizon)
+	}
+	if len(rep.Shards) != 2 {
+		t.Fatalf("shards %d", len(rep.Shards))
+	}
+	before, after, retired := rep.FoldTotals()
+	if before != 136772905 || after != 8716093 || retired != 15 {
+		t.Fatalf("totals %d %d %d", before, after, retired)
+	}
+}
+
+// A fold that was allowed to cut nowhere still ran, and reads as a
+// report with no shards rather than as a failure. The distinction
+// matters on a young store, where the oldest checkpoint is genesis and
+// there is nothing below it to fold for hours.
+func TestParseFoldReportAcceptsAFoldThatMovedNothing(t *testing.T) {
+	rep, err := ParseFoldReport([]byte(`{"horizon":"0/0","shards":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, after, retired := rep.FoldTotals()
+	if before != 0 || after != 0 || retired != 0 {
+		t.Fatalf("totals %d %d %d", before, after, retired)
+	}
+}
+
+// Noise has to be an error, not an empty report: a sample recorded
+// from garbage would read as a fold that ran and found nothing, which
+// is the one outcome indistinguishable from a healthy store.
+func TestParseFoldReportRefusesNoise(t *testing.T) {
+	for _, raw := range []string{"", "not json", "[]", `{"shards":[]}`} {
+		if _, err := ParseFoldReport([]byte(raw)); err == nil {
+			t.Fatalf("accepted %q", raw)
+		}
+	}
+}

@@ -146,6 +146,16 @@ func cmdSustain(argv []string) {
 	// hour before the first segment started and left 128 retired fold
 	// outputs behind it, the last of them 1.2 GB, 18 GB of shards for
 	// a database of 7.5 GB, and the disk went before the soak began.
+	// The fold timeline spans the whole soak, load phase included: the
+	// load is where the store grows fastest, so a timeline that starts
+	// at the first segment misses the folds that mattered most.
+	var foldMu sync.Mutex
+	var folds []map[string]any
+	recordFold := func(sample map[string]any) {
+		foldMu.Lock()
+		folds = append(folds, sample)
+		foldMu.Unlock()
+	}
 	stopLoad := make(chan struct{})
 	if sc.GCSecs > 0 {
 		go gcLoop(*zoubin, *store, time.Duration(sc.GCSecs)*time.Second,
@@ -153,7 +163,7 @@ func cmdSustain(argv []string) {
 	}
 	if sc.FoldSecs > 0 {
 		go foldLoop(*zoubin, *store, *pgbin, sc.GCRetention,
-			time.Duration(sc.FoldSecs)*time.Second, stopLoad)
+			time.Duration(sc.FoldSecs)*time.Second, runStart, stopLoad, recordFold)
 	}
 	tInit := time.Now()
 	initArgs := []string{"-i", "-q", "-s", strconv.Itoa(sc.Scale)}
@@ -216,7 +226,7 @@ func cmdSustain(argv []string) {
 		}
 		if sc.FoldSecs > 0 {
 			go foldLoop(*zoubin, *store, *pgbin, sc.GCRetention,
-				time.Duration(sc.FoldSecs)*time.Second, stopTick)
+				time.Duration(sc.FoldSecs)*time.Second, runStart, stopTick, recordFold)
 		}
 
 		// -n matters: a plain pgbench run truncates pgbench_history
@@ -385,6 +395,22 @@ func cmdSustain(argv []string) {
 		result["amp_bound_held"] = sustain.BoundHeld(overs)
 	}
 	overMu.Unlock()
+	foldMu.Lock()
+	if len(folds) > 0 {
+		result["folds"] = folds
+		// The headline is the last fold's footprint, because that is the
+		// store the run ended holding, and the sum of what every fold
+		// retired, because that is what a run without one would have
+		// been carrying by the end.
+		last := folds[len(folds)-1]
+		result["fold_bytes_after"] = last["bytes_after"]
+		retired := 0
+		for _, f := range folds {
+			retired += f["retired"].(int)
+		}
+		result["fold_layers_retired"] = retired
+	}
+	foldMu.Unlock()
 	result["violations"] = violations
 	if len(tpsVals) > 0 {
 		sum := 0.0
@@ -833,11 +859,18 @@ func gcLoop(zoubin, store string, every time.Duration, retention, window string,
 // oldest lsn a checkpoint inside the retention still names, so it is
 // the gc promise applied to page layers instead of to captures.
 //
-// Errors are dropped for the same reason the other loops drop them: a
-// fold landing during a drill finds a store nobody is holding, and
-// refusing to fold a shard it does not own is the refusal working.
-func foldLoop(zoubin, store, pgbin, retention string, every time.Duration, stop chan struct{}) {
-	args := []string{"compact", store, "local", "--horizon", "--pg-bin", pgbin}
+// Each fold reports itself as json and the outcome is recorded, so a
+// run that ends with a flat store can say the fold is why it is flat
+// rather than leaving the reader to assume it. A failed fold or
+// unreadable report drops the sample, absent beats invented, the same
+// rule compactLoop follows.
+//
+// Errors are otherwise dropped for the same reason the other loops
+// drop them: a fold landing during a drill finds a store nobody is
+// holding, and refusing to fold a shard it does not own is the
+// refusal working.
+func foldLoop(zoubin, store, pgbin, retention string, every time.Duration, start time.Time, stop chan struct{}, record func(sample map[string]any)) {
+	args := []string{"compact", store, "local", "--horizon", "--pg-bin", pgbin, "--json"}
 	if retention != "" {
 		args = append(args, "--retention", retention)
 	}
@@ -849,7 +882,25 @@ func foldLoop(zoubin, store, pgbin, retention string, every time.Duration, stop 
 			return
 		case <-t.C:
 		}
-		exec.Command(zoubin, args...).Run()
+		tFold := time.Now()
+		out, err := exec.Command(zoubin, args...).Output()
+		if err != nil {
+			continue
+		}
+		rep, err := sustain.ParseFoldReport(out)
+		if err != nil {
+			continue
+		}
+		before, after, retired := rep.FoldTotals()
+		record(map[string]any{
+			"t":            round1(time.Since(start).Seconds()),
+			"seconds":      round1(time.Since(tFold).Seconds()),
+			"horizon":      rep.Horizon,
+			"shards":       len(rep.Shards),
+			"retired":      retired,
+			"bytes_before": before,
+			"bytes_after":  after,
+		})
 	}
 }
 
