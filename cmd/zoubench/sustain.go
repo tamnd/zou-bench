@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"math/rand/v2"
@@ -402,13 +403,23 @@ func cmdSustain(argv []string) {
 		// store the run ended holding, and the sum of what every fold
 		// retired, because that is what a run without one would have
 		// been carrying by the end.
-		last := folds[len(folds)-1]
-		result["fold_bytes_after"] = last["bytes_after"]
-		retired := 0
+		// The headline comes off the last fold that actually ran. A
+		// failed fold is kept in the timeline with its reason, and
+		// counted, because a run whose folds all failed has to say so
+		// rather than report the store it happened to end with.
+		retired, failed := 0, 0
 		for _, f := range folds {
+			if _, bad := f["error"]; bad {
+				failed++
+				continue
+			}
 			retired += f["retired"].(int)
+			result["fold_bytes_after"] = f["bytes_after"]
 		}
 		result["fold_layers_retired"] = retired
+		if failed > 0 {
+			result["fold_failures"] = failed
+		}
 	}
 	foldMu.Unlock()
 	result["violations"] = violations
@@ -885,10 +896,12 @@ func foldLoop(zoubin, store, pgbin, retention string, every time.Duration, start
 		tFold := time.Now()
 		out, err := exec.Command(zoubin, args...).Output()
 		if err != nil {
+			record(foldFailure(start, tFold, foldWhy(err)))
 			continue
 		}
 		rep, err := sustain.ParseFoldReport(out)
 		if err != nil {
+			record(foldFailure(start, tFold, err.Error()))
 			continue
 		}
 		before, after, retired := rep.FoldTotals()
@@ -903,6 +916,31 @@ func foldLoop(zoubin, store, pgbin, retention string, every time.Duration, start
 			"bytes_after":  after,
 		})
 	}
+}
+
+// foldFailure is the sample a fold that did not run leaves behind. A
+// fold that fails every time and a fold that was never configured used
+// to read the same in the result file, which is the one thing a soak
+// cannot afford: the fold is what holds the store down over a day, and
+// its absence shows up as a disk that filled, hours after the reason.
+func foldFailure(start, tFold time.Time, why string) map[string]any {
+	return map[string]any{
+		"t":       round1(time.Since(start).Seconds()),
+		"seconds": round1(time.Since(tFold).Seconds()),
+		"error":   why,
+	}
+}
+
+// foldWhy prefers what the fold said over what exec noticed. The fold
+// puts its refusal on stderr and exits non zero, so the ExitError
+// carries the sentence worth reading and "exit status 1" does not.
+func foldWhy(err error) string {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+		lines := strings.Split(strings.TrimSpace(string(ee.Stderr)), "\n")
+		return lines[len(lines)-1]
+	}
+	return err.Error()
 }
 
 // verifyLedger checks that every acked id is present after a
