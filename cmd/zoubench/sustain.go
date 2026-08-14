@@ -151,6 +151,10 @@ func cmdSustain(argv []string) {
 		go gcLoop(*zoubin, *store, time.Duration(sc.GCSecs)*time.Second,
 			sc.GCRetention, sc.GCWindow, stopLoad)
 	}
+	if sc.FoldSecs > 0 {
+		go foldLoop(*zoubin, *store, *pgbin, sc.GCRetention,
+			time.Duration(sc.FoldSecs)*time.Second, stopLoad)
+	}
 	tInit := time.Now()
 	initArgs := []string{"-i", "-q", "-s", strconv.Itoa(sc.Scale)}
 	if sc.ServerSideInit {
@@ -209,6 +213,10 @@ func cmdSustain(argv []string) {
 		if sc.GCSecs > 0 {
 			go gcLoop(*zoubin, *store, time.Duration(sc.GCSecs)*time.Second,
 				sc.GCRetention, sc.GCWindow, stopTick)
+		}
+		if sc.FoldSecs > 0 {
+			go foldLoop(*zoubin, *store, *pgbin, sc.GCRetention,
+				time.Duration(sc.FoldSecs)*time.Second, stopTick)
 		}
 
 		// -n matters: a plain pgbench run truncates pgbench_history
@@ -801,6 +809,37 @@ func gcLoop(zoubin, store string, every time.Duration, retention, window string,
 	}
 	if window != "" {
 		args = append(args, "--window", window)
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+		}
+		exec.Command(zoubin, args...).Run()
+	}
+}
+
+// foldLoop drives the merge fold, the only thing that ever shrinks a
+// tenant's page layers. The sweep compactLoop runs merges the deltas
+// reads still pay for and leaves the history below them exactly where
+// it is, which is right for a sweep on a cadence of seconds and wrong
+// for a soak: an old image is somebody's base and every record ever
+// written is in some delta, so the layers track the write volume of
+// the whole run. The fold cuts one image holding every key the layers
+// below it held and retires them, and it will not fold above the
+// oldest lsn a checkpoint inside the retention still names, so it is
+// the gc promise applied to page layers instead of to captures.
+//
+// Errors are dropped for the same reason the other loops drop them: a
+// fold landing during a drill finds a store nobody is holding, and
+// refusing to fold a shard it does not own is the refusal working.
+func foldLoop(zoubin, store, pgbin, retention string, every time.Duration, stop chan struct{}) {
+	args := []string{"compact", store, "local", "--horizon", "--pg-bin", pgbin}
+	if retention != "" {
+		args = append(args, "--retention", retention)
 	}
 	t := time.NewTicker(every)
 	defer t.Stop()
