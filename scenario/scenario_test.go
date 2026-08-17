@@ -109,6 +109,41 @@ func TestFleetNeedsRequests(t *testing.T) {
 	}
 }
 
+func TestSocketsFillsInWhatARunNeedsAndRefusesEmptyShards(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.json")
+	body := `{"name":"x","kind":"sockets","sockets":1000,"shards":100}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sc, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sc.Table != "pulse" || sc.Batch != 25 || sc.Writers != 4 || sc.DrainSecs != 10 || sc.HeartbeatSecs != 30 {
+		t.Fatalf("defaults = %+v", sc)
+	}
+
+	// Shards nobody joined would take rows that then read as
+	// undelivered, so the arithmetic is refused before a run, not
+	// explained after one.
+	empty := filepath.Join(dir, "empty.json")
+	if err := os.WriteFile(empty, []byte(`{"name":"x","kind":"sockets","sockets":10,"shards":100}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(empty); err == nil {
+		t.Fatal("expected an error for more shards than sockets")
+	}
+
+	none := filepath.Join(dir, "none.json")
+	if err := os.WriteFile(none, []byte(`{"name":"x","kind":"sockets"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(none); err == nil {
+		t.Fatal("expected an error for a sockets scenario with no sockets")
+	}
+}
+
 func TestEveryCheckedInScenarioLoads(t *testing.T) {
 	entries, err := os.ReadDir("../scenarios")
 	if err != nil {

@@ -123,6 +123,42 @@ func TestStartingUpIsRetriableAndOthersAreNot(t *testing.T) {
 	}
 }
 
+// A zou node's postgres door asks for the password in the clear, since
+// the password is the project's api key and the point is to read it.
+func TestACleartextAskIsAnsweredWithThePassword(t *testing.T) {
+	got := make(chan string, 1)
+	sock := fakeServer(t, func(c net.Conn) {
+		readLen(c)
+		c.Write(msg('R', 0, 0, 0, 3)) // cleartext password, please
+		var kind [1]byte
+		readFull(c, kind[:])
+		body := readLen(c)
+		if kind[0] != 'p' {
+			t.Errorf("answered a password ask with a %c", kind[0])
+		}
+		got <- string(body[:len(body)-1])
+		c.Write(append(authOK(), ready()...))
+	})
+	conn, err := DialPassword(sock, "postgres.acme", "postgres", "a.jwt.here")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if sent := <-got; sent != "a.jwt.here" {
+		t.Errorf("the door was sent %q", sent)
+	}
+
+	// And a run that has no password to give says so, rather than hanging
+	// on a door that will not open.
+	quiet := fakeServer(t, func(c net.Conn) {
+		readLen(c)
+		c.Write(msg('R', 0, 0, 0, 3))
+	})
+	if _, err := Dial(quiet, "postgres", "postgres"); err == nil {
+		t.Error("a password ask with no password was not an error")
+	}
+}
+
 func TestWaitReadyOutlivesARefusedSocket(t *testing.T) {
 	sock := filepath.Join(sockDir(t), ".s.PGSQL.5432")
 	go func() {

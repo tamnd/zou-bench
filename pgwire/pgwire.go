@@ -17,7 +17,8 @@ import (
 
 // Conn is one open backend connection past its startup handshake.
 type Conn struct {
-	c net.Conn
+	c        net.Conn
+	password string
 }
 
 // Dial connects and completes the startup handshake. Addr is a unix
@@ -27,6 +28,16 @@ type Conn struct {
 // server must trust the connection, any authentication request is an
 // error.
 func Dial(addr, user, database string) (*Conn, error) {
+	return DialPassword(addr, user, database, "")
+}
+
+// DialPassword is the same with a password to answer a cleartext ask
+// with, which is what a zou node's postgres door wants: the password
+// there is the project's api key, and asking for it in the clear is the
+// point rather than a weakness, since a bearer token proves nothing
+// until it is read. A postmaster on trust never asks and the password
+// goes unused.
+func DialPassword(addr, user, database, password string) (*Conn, error) {
 	network := "tcp"
 	if strings.ContainsAny(addr, `/\`) {
 		network = "unix"
@@ -35,7 +46,7 @@ func Dial(addr, user, database string) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn := &Conn{c: c}
+	conn := &Conn{c: c, password: password}
 	if err := conn.startup(user, database); err != nil {
 		c.Close()
 		return nil, err
@@ -67,8 +78,17 @@ func (conn *Conn) startup(user, database string) error {
 		}
 		switch kind {
 		case 'R':
-			if code := binary.BigEndian.Uint32(payload); code != 0 {
-				return fmt.Errorf("server wants auth method %d, pgwire only does trust", code)
+			switch code := binary.BigEndian.Uint32(payload); code {
+			case 0: // AuthenticationOk
+			case 3: // cleartext password
+				if conn.password == "" {
+					return fmt.Errorf("server wants a password and none was given")
+				}
+				if err := conn.sendPassword(); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("server wants auth method %d, pgwire does trust and cleartext", code)
 			}
 		case 'E':
 			return errorResponse(payload)
@@ -80,6 +100,17 @@ func (conn *Conn) startup(user, database string) error {
 			return fmt.Errorf("unexpected %c during startup", kind)
 		}
 	}
+}
+
+// sendPassword answers a cleartext ask, which is a PasswordMessage
+// carrying the password with its terminator.
+func (conn *Conn) sendPassword() error {
+	msg := make([]byte, 5+len(conn.password)+1)
+	msg[0] = 'p'
+	binary.BigEndian.PutUint32(msg[1:], uint32(len(msg)-1))
+	copy(msg[5:], conn.password)
+	_, err := conn.c.Write(msg)
+	return err
 }
 
 // Query runs one simple query and returns the first column of the
