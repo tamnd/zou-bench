@@ -178,6 +178,11 @@ Rows a second and deliveries a second are different numbers and the shards are w
 Every socket subscribes with a filter of `shard=eq.N`, the sockets are spread evenly over the shards, and a row is written to one shard, so one row is delivered to every socket on that shard.
 `sockets-100k` is a hundred thousand sockets over a thousand shards, a hundred sockets each, at a thousand rows a second, which is a hundred thousand deliveries a second going out of the node.
 Raising `shards` at a fixed socket count moves work from fan out to change processing, and lowering it does the opposite, which is how the two costs are told apart.
+`sockets-100k-wide` is the same hundred thousand sockets over ten thousand shards, nine sockets each, which is ten thousand deliveries a second from the same thousand rows.
+
+`writers` and `batch` are the other half of the rate and they are not free knobs.
+A row a second is a commit somebody waited for, so the rate a run can reach is the writers times the rows in a transaction over what a commit costs, and a project's postmaster takes forty connections in total, so past that the answer has to be bigger transactions or a faster commit.
+The two 100k runs are the same measurement with those moved: eight writers at twenty five rows reached 62.8 rows a second, sixteen at two hundred and fifty reached 455, with nothing about the node changed in between.
 
 Three things make the latency worth publishing.
 One clock: the generator stamps `sent_us` into the row before it sends the insert and the same process times the frame that comes back, so no ntp skew is in the number and the stamp being early makes it a ceiling rather than a flattering slice.
@@ -216,6 +221,7 @@ A run where each socket is a different signed in user is a different measurement
 - `fleet-800-idle`: eight hundred mostly asleep projects, a hundred attached at once and ninety minutes of hold against a ten minute idle budget, which is the long tail cost scenario.
 - `fleet-smoke`: the same shape at ten tenants, for checking the harness works before spending half an hour on initdb.
 - `sockets-100k`: a hundred thousand sockets over a thousand shards at a thousand rows a second, five minutes measured, which is a hundred thousand deliveries a second.
+- `sockets-100k-wide`: the same hundred thousand sockets over ten thousand shards in two hundred and fifty row transactions, which is ten thousand deliveries a second and a write side that can nearly keep up.
 - `sockets-100k-rls`: the same shape with row level security on the table, so the visibility check is in the measured path.
 - `sockets-smoke`: a thousand sockets over a hundred shards for a minute, for checking the generator and the node can see each other before opening a hundred thousand descriptors.
 
