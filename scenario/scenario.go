@@ -119,6 +119,26 @@ type Scenario struct {
 	SampleSecs int `json:"sample_secs"`
 	SettleSecs int `json:"settle_secs"`
 	DrainSecs  int `json:"drain_secs"`
+	// Sockets, Shards, ConnectRate, Rows, Batch, Writers and
+	// HeartbeatSecs shape a sockets scenario: how many websockets the
+	// node holds, how many change subscriptions they divide themselves
+	// between, how fast they are opened, and the write load committed
+	// under them. Shards is what turns one committed row into a fan out,
+	// because every socket on a shard is owed the same row, so the
+	// deliveries a run expects are the rows times the sockets per shard
+	// rather than the rows.
+	// Table is what the sockets subscribe to and the writer writes, and
+	// DrainSecs is read here too: on a sockets run it is the seconds the
+	// sockets are read after the window closes, so a row committed in the
+	// last instant of it still has somewhere to land.
+	Sockets       int    `json:"sockets"`
+	Shards        int    `json:"shards"`
+	ConnectRate   int    `json:"connect_rate"`
+	Rows          int    `json:"rows"`
+	Batch         int    `json:"batch"`
+	Writers       int    `json:"writers"`
+	HeartbeatSecs int    `json:"heartbeat_secs"`
+	Table         string `json:"table"`
 }
 
 // IsREST reports whether the http driver owns this scenario.
@@ -132,6 +152,9 @@ func (s Scenario) IsSustain() bool { return s.Kind == "sustain" }
 
 // IsFleet reports whether the many tenant driver owns this scenario.
 func (s Scenario) IsFleet() bool { return s.Kind == "fleet" }
+
+// IsSockets reports whether the realtime driver owns this scenario.
+func (s Scenario) IsSockets() bool { return s.Kind == "sockets" }
 
 // Load reads a scenario and returns it along with the raw document,
 // which goes into the result file verbatim so a result always carries
@@ -185,6 +208,35 @@ func Load(path string) (Scenario, map[string]any, error) {
 		// cannot do what it says, and the time to say so is at load.
 		if sc.WorkingSet > sc.Tenants {
 			return Scenario{}, nil, fmt.Errorf("%s: working_set %d is larger than tenants %d", path, sc.WorkingSet, sc.Tenants)
+		}
+	}
+	if sc.IsSockets() {
+		if sc.Sockets == 0 {
+			return Scenario{}, nil, fmt.Errorf("%s: a sockets scenario needs sockets", path)
+		}
+		if sc.Table == "" {
+			sc.Table = "pulse"
+		}
+		if sc.Shards == 0 {
+			sc.Shards = 1
+		}
+		// A shard nobody joined would take rows the run then reports as
+		// undelivered, so the arithmetic is refused at load rather than
+		// blamed on the node an hour later.
+		if sc.Shards > sc.Sockets {
+			return Scenario{}, nil, fmt.Errorf("%s: %d shards and only %d sockets, so some shard would have nobody on it", path, sc.Shards, sc.Sockets)
+		}
+		if sc.Batch == 0 {
+			sc.Batch = 25
+		}
+		if sc.Writers == 0 {
+			sc.Writers = 4
+		}
+		if sc.DrainSecs == 0 {
+			sc.DrainSecs = 10
+		}
+		if sc.HeartbeatSecs == 0 {
+			sc.HeartbeatSecs = 30
 		}
 	}
 	if sc.IsSustain() {

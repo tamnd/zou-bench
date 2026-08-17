@@ -156,6 +156,55 @@ A month is 730 hours of the dormant rate plus 730 hours of the attached rate tim
 The store is only half the bill, so `--box-usd-month` and `--box-source` carry the price of the box the node runs on, from an invoice rather than a guess.
 Without them the compute line reads `not priced` instead of zero, and the per project number then covers the store alone, which is what `store_usd_per_project_month` always reports.
 
+## Socket runs
+
+`zoubench sockets` holds a great many realtime sockets against one node and commits rows under them, which is the one question in this harness that http requests cannot answer: what a change costs when a hundred thousand people are waiting for it.
+
+```
+./zoubench sockets scenarios/sockets-100k.json \
+    --url http://server3:54321/bench --label zou-server3 \
+    --jwt-secret super-secret-jwt-token-with-at-least-32-characters-long \
+    --dsn "host=server3 port=54322 dbname=postgres user=postgres.bench" \
+    --write-dsn server3:54322 --write-user postgres.bench \
+    --ops http://server3:9464/metrics \
+    --ports 54321,54322,54323
+```
+
+The generator and the node have to be different boxes.
+A hundred thousand sockets is a hundred thousand descriptors and a goroutine each on the generator, and if that is on the node then the node's cpu is partly this program and the number is about nothing.
+The node also has to be `zou serve` rather than `zou dev`, because dev binds loopback and nothing off the box can reach it.
+
+Rows a second and deliveries a second are different numbers and the shards are what connect them.
+Every socket subscribes with a filter of `shard=eq.N`, the sockets are spread evenly over the shards, and a row is written to one shard, so one row is delivered to every socket on that shard.
+`sockets-100k` is a hundred thousand sockets over a thousand shards, a hundred sockets each, at a thousand rows a second, which is a hundred thousand deliveries a second going out of the node.
+Raising `shards` at a fixed socket count moves work from fan out to change processing, and lowering it does the opposite, which is how the two costs are told apart.
+
+Three things make the latency worth publishing.
+One clock: the generator stamps `sent_us` into the row before it sends the insert and the same process times the frame that comes back, so no ntp skew is in the number and the stamp being early makes it a ceiling rather than a flattering slice.
+`commit_ms` publishes the head of that span, the round trip and the commit, and the node's own `commit_to_socket` histogram is the same distance measured from the database's commit timestamp, so all three are in the result file and none has to be taken on faith.
+Exact accounting: expected deliveries are rows per shard times sockets per shard, counted per shard, and `deliveries_missing` is that minus what arrived, so a run that dropped frames says so instead of publishing a fast percentile over the ones that survived.
+The node's own view: the ops port is scraped before and after for `zou_realtime_sockets`, `zou_realtime_subscribers`, the change counter and both histograms, so the node's account of the run sits beside the client's.
+
+A run is warmup, then the measured window, then drain, and a delivery counts only when its stamp falls inside the window.
+Everything else is counted apart under `deliveries_outside_window`, so warmup rows still arriving after the window opens cannot inflate the count and the drain cannot deflate it.
+The drain is what makes the last second of the window as honest as the first: without it the frames still in flight when the window closes would read as missing.
+
+Generator side settings that decide whether the run is measuring the node or the generator.
+The harness raises `RLIMIT_NOFILE` as far as the box's hard limit allows and warns when that is under the socket count, which is the difference between a real refusal and a shell default.
+A socket is unique by source address, source port and destination port, and what one source address has to one destination port is not 65535 but its ephemeral range, which is `32768 60999` on a stock kernel and so 28231.
+That number is the first ceiling a socket run hits and it does not arrive as a refusal.
+Well before the range is full the kernel is scanning most of it on every connect, holding a hash bucket lock while it does, and a 50k socket ramp over three destination ports was measured spending 70 percent of the generator inside `__inet_check_established`, `__inet_hash_connect` and the queued spinlock, with the ramp falling from 350 connects a second to 55 and the node under test sitting at 22 percent of its cpu.
+A slow ramp reads like the node's accept path and is not.
+So widen the range on the generator, `sysctl -w net.ipv4.ip_local_port_range="20000 65535"` for 45536 a destination, and check nothing on the box listens inside what you took.
+`--ports 54341,54342,54343,54346,54347,54348` then deals the sockets over the ports a node started with `zou serve --http` answers on, which is the same api on every one of them, and `--local` does the same with source addresses when the box has more than one.
+Both together are a cross product, and the ramp walks the addresses first so two lists of the same length still cover it.
+Aim to leave every destination port about a third of its range full rather than three quarters, because the scan cost is what fills up first.
+`--read-buf` is per socket and multiplies by the socket count, 2 KB at a hundred thousand sockets being 200 MB of buffers before anything else, and `--dialers` caps handshakes in flight while `connect_rate` paces the ramp so the node is not measured on its accept queue.
+
+The caveat to publish with the number: every socket in these scenarios carries the same anon key, and the node does one visibility check and builds one payload per distinct claim set per change, so a hundred thousand sockets sharing a key cost one check per change rather than a hundred thousand.
+A run where each socket is a different signed in user is a different measurement and needs its own scenario.
+`sockets-100k-rls` is the nearer half of that, the same shape with row level security on the table, so the check is measured rather than skipped.
+
 ## Scenarios
 
 - `tpcb-scale100`: pgbench tpcb-like, scale 100, 8 clients, 60 s, with data load.
@@ -166,6 +215,9 @@ Without them the compute line reads `not priced` instead of zero, and the per pr
 - `fleet-1000-warm`: the same thousand tenants with a ten minute warmup, long enough that the working set is attached before the measured window opens.
 - `fleet-800-idle`: eight hundred mostly asleep projects, a hundred attached at once and ninety minutes of hold against a ten minute idle budget, which is the long tail cost scenario.
 - `fleet-smoke`: the same shape at ten tenants, for checking the harness works before spending half an hour on initdb.
+- `sockets-100k`: a hundred thousand sockets over a thousand shards at a thousand rows a second, five minutes measured, which is a hundred thousand deliveries a second.
+- `sockets-100k-rls`: the same shape with row level security on the table, so the visibility check is in the measured path.
+- `sockets-smoke`: a thousand sockets over a hundred shards for a minute, for checking the generator and the node can see each other before opening a hundred thousand descriptors.
 
 Scenario files are plain json, add one per workload and keep them small and explicit.
 Fields: name, init, scale, clients, threads, duration, warmup, builtin, script, rate.
@@ -176,6 +228,10 @@ A request carries a name, a method and path, a weight in the mix, the token it u
 `{{rand:lo:hi}}` and `{{hex}}` in a path are substituted per request, so a row by primary key run reads a different row every time rather than one very warm page.
 
 Paths are written without an api prefix and `--url` carries it, which is what lets one scenario ask the same questions of two servers that mount their api in different places: zou answers under `/rest/v1`, a bare PostgREST answers at the root.
+
+A scenario with `kind` set to `sockets` is driven by `zoubench sockets` and adds `sockets`, `shards`, `connect_rate`, `rows`, `batch`, `writers`, `heartbeat_secs`, and `table` to `setup`, `duration`, `warmup`, and `drain_secs`.
+`rows` is rows a second across all writers and `batch` is how many go in one insert, so the two together decide how often the write side says anything.
+A scenario asking for more shards than sockets is refused rather than run, because a shard with nobody on it is a row nobody is waiting for.
 
 ## Comparing fairly
 

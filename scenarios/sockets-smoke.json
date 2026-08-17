@@ -1,0 +1,16 @@
+{
+  "name": "sockets-smoke",
+  "kind": "sockets",
+  "setup": "sockets.sql",
+  "table": "pulse",
+  "sockets": 1000,
+  "shards": 100,
+  "connect_rate": 500,
+  "rows": 100,
+  "batch": 10,
+  "writers": 2,
+  "duration": 60,
+  "warmup": 10,
+  "drain_secs": 10,
+  "heartbeat_secs": 30
+}
