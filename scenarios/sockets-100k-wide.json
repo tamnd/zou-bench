@@ -1,0 +1,16 @@
+{
+  "name": "sockets-100k-wide",
+  "kind": "sockets",
+  "setup": "sockets.sql",
+  "table": "pulse",
+  "sockets": 100000,
+  "shards": 10000,
+  "connect_rate": 2000,
+  "rows": 1000,
+  "batch": 250,
+  "writers": 16,
+  "duration": 300,
+  "warmup": 60,
+  "drain_secs": 15,
+  "heartbeat_secs": 30
+}
