@@ -1,15 +1,16 @@
 // Package zoustats reads the store op counter file zou keeps when
-// ZOU_STORE_STATS is set, format 3 from crates/zou-store/src/stats.rs.
+// ZOU_STORE_STATS is set, format 4 from crates/zou-store/src/stats.rs.
 //
 // The file is little endian u64 slots behind a magic and format
 // header: count and bytes per op kind and key class, a power of two
 // microsecond latency histogram per op kind, io errors per kind, one
 // CAS conflict counter, per read tier the smgr call count, page count,
-// and call latency histogram, and per page service phase a sample
-// count and its own histogram. Counters accumulate for the life of one
-// zou boot, so the harness snapshots the file before and after a run
-// and works on the difference. Reading is a plain cold file read, it
-// never disturbs the live counters.
+// and call latency histogram, per page service phase a sample count
+// and its own histogram, and per commit path step the same pair.
+// Counters accumulate for the life of one zou boot, so the harness
+// snapshots the file before and after a run and works on the
+// difference. Reading is a plain cold file read, it never disturbs the
+// live counters.
 //
 // The tiers say where a page came from, the phases say what the wait
 // was made of. A read the page service answered is one tier sample at
@@ -17,6 +18,16 @@
 // spent waiting on ingest plus a read sample for the read itself. The
 // ingest phase is the serve loop doing something other than answering,
 // which is every queued reader's latency.
+//
+// The commit steps say what a commit's wait was made of, from the
+// pusher picking WAL up to the durable watermark passing it: push is
+// the gap between one chunk reaching the pipeline and the next, stage
+// is the append call itself, window is how long the batch a chunk
+// joined stayed open, dispatch is the wait from that batch closing to
+// a worker taking it, put is the store call, ack is the wait from the
+// put finishing to the ack resolving in chain order, and durable is
+// the whole of it end to end. Push, stage, and durable are sampled per
+// chunk, the other four per batch.
 package zoustats
 
 import (
@@ -30,12 +41,14 @@ var opNames = [6]string{"get", "get_range", "put_if_match", "put", "delete", "li
 var classNames = [7]string{"manifest", "wal", "chk", "shards", "page", "file", "other"}
 var tierNames = [4]string{"cache", "local", "store", "service"}
 var phaseNames = [3]string{"park", "read", "ingest"}
+var stepNames = [7]string{"push", "stage", "window", "dispatch", "put", "ack", "durable"}
 
 const (
 	kinds        = 6
 	classes      = 7
 	tiers        = 4
 	phases       = 3
+	steps        = 7
 	buckets      = 32
 	header       = 2
 	bucketBase   = header + kinds*classes*2
@@ -43,8 +56,9 @@ const (
 	conflictSlot = errorBase + kinds
 	tierBase     = conflictSlot + 1
 	phaseBase    = tierBase + tiers*(2+buckets)
-	slots        = phaseBase + phases*(1+buckets)
-	format       = 3
+	stepBase     = phaseBase + phases*(1+buckets)
+	slots        = stepBase + steps*(1+buckets)
+	format       = 4
 )
 
 var magic = binary.LittleEndian.Uint64([]byte("ZOUSTATS"))
@@ -55,8 +69,9 @@ type Counters [slots]uint64
 func countSlot(kind, class int) int { return header + (kind*classes+class)*2 }
 func tierSlot(tier int) int         { return tierBase + tier*(2+buckets) }
 func phaseSlot(phase int) int       { return phaseBase + phase*(1+buckets) }
+func stepSlot(step int) int         { return stepBase + step*(1+buckets) }
 
-// Read decodes a counter file, refusing anything that is not format 3.
+// Read decodes a counter file, refusing anything that is not format 4.
 func Read(path string) (Counters, error) {
 	var c Counters
 	raw, err := os.ReadFile(path)
@@ -153,12 +168,29 @@ func Report(c Counters) map[string]any {
 			"p99_us": percentile(hist, calls, 0.99),
 		}
 	}
+	commit := map[string]any{}
+	for step, name := range stepNames {
+		samples := c[stepSlot(step)]
+		if samples == 0 {
+			continue
+		}
+		hist := c[stepSlot(step)+1 : stepSlot(step)+1+buckets]
+		commit[name] = map[string]any{
+			"samples": samples,
+			"p50_us":  percentile(hist, samples, 0.50),
+			"p95_us":  percentile(hist, samples, 0.95),
+			"p99_us":  percentile(hist, samples, 0.99),
+		}
+	}
 	out := map[string]any{"ops": ops, "cas_conflicts": c[conflictSlot]}
 	if len(reads) > 0 {
 		out["reads"] = reads
 	}
 	if len(pagesvc) > 0 {
 		out["pagesvc"] = pagesvc
+	}
+	if len(commit) > 0 {
+		out["commit"] = commit
 	}
 	return out
 }

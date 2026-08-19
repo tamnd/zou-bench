@@ -170,3 +170,42 @@ func TestReportCarriesPageServicePhases(t *testing.T) {
 		t.Fatalf("ingest p50 %d", p50)
 	}
 }
+
+// The commit steps are the only place a result says whether a write
+// waited on the store or on the pipeline in front of it, and they sit
+// past the phases in the file, so a decode that stops early would drop
+// them silently rather than fail.
+func TestReportCarriesCommitSteps(t *testing.T) {
+	c, err := Read(write(t, func(c *Counters) {
+		c[stepSlot(0)] = 400      // push
+		c[stepSlot(0)+1+11] = 400 // 2 to 4 ms
+		c[stepSlot(4)] = 90       // put
+		c[stepSlot(4)+1+13] = 90  // 8 to 16 ms
+		c[stepSlot(6)] = 400      // durable
+		c[stepSlot(6)+1+14] = 400 // 16 to 32 ms
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := Report(c)
+	commit, ok := rep["commit"].(map[string]any)
+	if !ok {
+		t.Fatal("no commit block")
+	}
+	if len(commit) != 3 {
+		t.Fatalf("steps with no samples were reported: %v", commit)
+	}
+	push := commit["push"].(map[string]any)
+	if push["samples"].(uint64) != 400 || push["p50_us"].(uint64) != 4096 {
+		t.Fatalf("push step wrong: %v", push)
+	}
+	if p50 := commit["put"].(map[string]any)["p50_us"].(uint64); p50 != 16384 {
+		t.Fatalf("put p50 %d", p50)
+	}
+	if p50 := commit["durable"].(map[string]any)["p50_us"].(uint64); p50 != 32768 {
+		t.Fatalf("durable p50 %d", p50)
+	}
+	if _, spilled := rep["pagesvc"]; spilled {
+		t.Fatal("commit samples leaked into the page service phases")
+	}
+}
