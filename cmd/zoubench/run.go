@@ -100,19 +100,26 @@ func cmdRun(argv []string) {
 	sys := sampler.NewSystem()
 	sys.Start()
 
-	var storeBefore storefs.Footprint
+	// Three marks rather than two, because a run that loads its own
+	// data is two workloads and they answer different questions.
+	// This is the first: before anything is loaded.
+	//
+	// Store op counters accumulate for the life of one zou boot, so
+	// what a phase did is the difference between two reads of the
+	// file, and the phases have to be cut where the timed window is
+	// cut. They were not: the store was measured here and the wal
+	// bytes were taken after the load, so every init scenario divided
+	// the whole of loading scale 100 by sixty seconds of transactions
+	// and published a write amplification in the hundreds and a
+	// dollars per million transactions that was mostly the load.
+	var storeStart, storeBefore storefs.Footprint
 	if *storedir != "" {
-		storeBefore, err = storefs.Measure(*storedir)
+		storeStart, err = storefs.Measure(*storedir)
 		die(err)
 	}
-
-	// Store op counters accumulate for the life of one zou boot, so
-	// the run's own ops are the difference between here and the end.
-	// Init counts on purpose: loading the data is part of what the
-	// run cost.
-	var opsBefore zoustats.Counters
+	var opsStart, opsBefore zoustats.Counters
 	if *statsfile != "" {
-		opsBefore, err = zoustats.Read(*statsfile)
+		opsStart, err = zoustats.Read(*statsfile)
 		die(err)
 	}
 
@@ -134,6 +141,20 @@ func cmdRun(argv []string) {
 		warm := exec.Command(pgbench.Tool("pgbench"), append(benchArgs(sc, sc.Warmup, "", rest[0]), conn...)...)
 		warm.Stdout, warm.Stderr = os.Stderr, os.Stderr
 		die(warm.Run())
+	}
+
+	// The second mark, where the timed window starts. Everything the
+	// result publishes as this workload's rate, latency and cost is
+	// the difference between here and the end, and it is taken beside
+	// the postgres snapshot rather than before the load so the two
+	// cover the same seconds.
+	if *storedir != "" {
+		storeBefore, err = storefs.Measure(*storedir)
+		die(err)
+	}
+	if *statsfile != "" {
+		opsBefore, err = zoustats.Read(*statsfile)
+		die(err)
 	}
 
 	before := pgstats.Snapshot(psql, conn)
@@ -184,6 +205,12 @@ func cmdRun(argv []string) {
 			"bytes_delta":   storeAfter.Bytes - storeBefore.Bytes,
 			"objects_after": storeAfter.Objects,
 		}
+		if sc.Init {
+			// Where the store was before the data was loaded, so the
+			// line above can be read as this workload's growth without
+			// having to know whether the run loaded anything.
+			store["bytes_at_start"] = storeStart.Bytes
+		}
 		// Write amplification: bytes the store grew per byte of WAL the
 		// workload generated. Checkpoints and manifest churn land here.
 		if d, ok := result["pg_delta"].(map[string]map[string]float64); ok {
@@ -214,6 +241,39 @@ func cmdRun(argv []string) {
 		}
 	}
 
+	// What loading the data cost, on its own. It is the same store and
+	// the same counters over the phase before the timed window, and it
+	// is kept apart because it answers a different question: the
+	// workload lines say what a second of this traffic costs, this
+	// says what putting a scale 100 database into the store cost once.
+	// Folded together they say neither, since a sixty second run that
+	// loaded ten million rows is mostly the load.
+	loadUsage := cost.Usage{}
+	if sc.Init {
+		load := map[string]any{"seconds": result["init_seconds"]}
+		if *storedir != "" {
+			grew := storeBefore.Bytes - storeStart.Bytes
+			load["store_bytes"] = grew
+			load["store_objects"] = storeBefore.Objects - storeStart.Objects
+			loadUsage.StorageBytes = storeBefore.Bytes
+			if grew > 0 {
+				loadUsage.IngestedBytes = grew
+			}
+		}
+		if *statsfile != "" {
+			if d, err := zoustats.Diff(opsStart, opsBefore); err == nil {
+				load["store_ops"] = zoustats.Report(d)
+				if t := zoustats.Sum(d); t.AnyTraffic {
+					loadUsage.Puts, loadUsage.Gets = t.Puts, t.Gets
+					loadUsage.Lists, loadUsage.Deletes = t.Lists, t.Deletes
+					loadUsage.UploadBytes, loadUsage.DownloadBytes = t.PutBytes, t.GetBytes
+					loadUsage.Measured = true
+				}
+			}
+		}
+		result["load"] = load
+	}
+
 	if n, ok := result["transactions"].(int); ok {
 		usage.Txns = int64(n)
 	}
@@ -230,6 +290,9 @@ func cmdRun(argv []string) {
 		card, err := cost.Find(*cardsdir, cardName)
 		die(err)
 		result["cost"] = cost.Compute(card, usage)
+		if load, ok := result["load"].(map[string]any); ok {
+			load["cost"] = cost.Compute(card, loadUsage)
+		}
 	}
 
 	die(os.MkdirAll(*outdir, 0o755))
