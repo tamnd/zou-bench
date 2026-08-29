@@ -167,6 +167,14 @@ func cmdRun(argv []string) {
 		storeAfter, err := storefs.Measure(*storedir)
 		die(err)
 		usage.StorageBytes = storeAfter.Bytes
+		// What the run ingested, for the dollars per GB ingested line.
+		// The store's growth rather than everything written to it,
+		// since a page rewritten ten times was ingested once, and a
+		// phase that folded more than it wrote can grow by less than
+		// nothing, which is not an ingest of a negative amount.
+		if grew := storeAfter.Bytes - storeBefore.Bytes; grew > 0 {
+			usage.IngestedBytes = grew
+		}
 		store := map[string]any{
 			"path":          *storedir,
 			"bytes_before":  storeBefore.Bytes,
@@ -194,7 +202,12 @@ func cmdRun(argv []string) {
 		if t := zoustats.Sum(delta); t.AnyTraffic {
 			usage.Puts, usage.Gets = t.Puts, t.Gets
 			usage.Lists, usage.Deletes = t.Lists, t.Deletes
-			usage.EgressBytes = t.GetBytes
+			// Bytes moved, not bytes egressed. The two are the same
+			// count and a different price: transfer is charged on top
+			// of the request on the cards that do that at all, and
+			// egress is charged only when the reader is out on the
+			// internet, which in this harness it never is.
+			usage.UploadBytes, usage.DownloadBytes = t.PutBytes, t.GetBytes
 			usage.Measured = true
 		}
 	}
@@ -247,7 +260,7 @@ func simCard(spec string) string {
 	case "s3-standard":
 		return "aws-s3-standard"
 	case "s3-express":
-		return "aws-s3-express-one-zone"
+		return "aws-s3-express"
 	case "r2":
 		return "cloudflare-r2"
 	case "gcs":

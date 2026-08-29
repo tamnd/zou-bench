@@ -1,14 +1,17 @@
 {
   "name": "backblaze-b2",
+  "as_of": "2026-08-29",
   "source": "https://www.backblaze.com/cloud-storage/pricing",
-  "dated": "2026-08-01",
-  "kind": "retail",
-  "storage_gb_month_usd": 0.006,
-  "put_per_1000_usd": 0,
-  "get_per_1000_usd": 0.0004,
-  "list_per_1000_usd": 0.004,
-  "delete_per_1000_usd": 0,
-  "egress_per_gb_usd": 0.01,
-  "min_storage_days": 0,
-  "notes": "uploads are free class A, egress free up to 3x monthly storage, verify before publishing"
+  "note": "6.95 per TB per month. Class A, B and C API calls are free, which is why every request line on this card is zero, and the class D calls that are not free are ones the store never makes.",
+  "gb_bytes": 1073741824.0,
+  "storage_per_gb_month": 0.006787109375,
+  "class_a_per_million": 0.0,
+  "class_b_per_million": 0.0,
+  "delete_per_million": 0.0,
+  "upload_per_gb": 0.0,
+  "retrieval_per_gb": 0.0,
+  "egress_per_gb": 0.01,
+  "egress_free_gb_month": 0.0,
+  "egress_free_times_storage": 3.0,
+  "needs_box": false
 }

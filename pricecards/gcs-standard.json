@@ -1,14 +1,17 @@
 {
   "name": "gcs-standard",
+  "as_of": "2026-08-29",
   "source": "https://cloud.google.com/storage/pricing",
-  "dated": "2026-08-01",
-  "kind": "retail",
-  "storage_gb_month_usd": 0.02,
-  "put_per_1000_usd": 0.005,
-  "get_per_1000_usd": 0.0004,
-  "list_per_1000_usd": 0.005,
-  "delete_per_1000_usd": 0,
-  "egress_per_gb_usd": 0.12,
-  "min_storage_days": 0,
-  "notes": "us regions standard class, verify before publishing"
+  "note": "us-central1 regional Standard. Class A is double this in multi region and dual region buckets. The always free tier is left out, since a tenant that fits in it is not the tenant a cost model is about.",
+  "gb_bytes": 1073741824.0,
+  "storage_per_gb_month": 0.02,
+  "class_a_per_million": 5.0,
+  "class_b_per_million": 0.4,
+  "delete_per_million": 0.0,
+  "upload_per_gb": 0.0,
+  "retrieval_per_gb": 0.0,
+  "egress_per_gb": 0.12,
+  "egress_free_gb_month": 0.0,
+  "egress_free_times_storage": 0.0,
+  "needs_box": false
 }

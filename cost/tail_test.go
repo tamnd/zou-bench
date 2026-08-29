@@ -2,16 +2,7 @@ package cost
 
 import "testing"
 
-func card() Card {
-	return Card{
-		Name:           "test-retail",
-		Kind:           "retail",
-		StorageGBMonth: 0.02,
-		PutPer1000:     0.005,
-		GetPer1000:     0.0004,
-		ListPer1000:    0.005,
-	}
-}
+func card() Card { return retail() }
 
 // The two rates are charged differently on purpose: the node's own
 // housekeeping is one node whatever the fleet size, and a held project
@@ -69,8 +60,12 @@ func TestComputeIsNamedNotPricedRatherThanZero(t *testing.T) {
 // A self hosted card has no per gigabyte price, it has a box and a
 // disk, and the storage line is the share of that box the bytes take.
 func TestASelfHostedCardAmortizesItsBox(t *testing.T) {
+	// Twenty a month over 400 GiB of usable disk, which is the number
+	// the card carries rather than a box price this has to divide: zou
+	// exports the self hosted card empty and the caller folds its own
+	// --box and --box-tb in before it becomes a card at all.
 	got := Monthly(Card{
-		Name: "ours", Kind: "selfhosted", BoxUSDMonth: 20, CapacityGB: 400,
+		Name: "ours", GBBytes: gb, StoragePerGBMonth: 20.0 / 400.0,
 	}, Tail{Projects: 800, StorageBytes: 40 * gb})
 	if got["storage_usd_month"].(float64) != 2.0 {
 		t.Fatalf("storage = %v", got["storage_usd_month"])
