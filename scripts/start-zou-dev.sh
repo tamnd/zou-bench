@@ -15,9 +15,12 @@ HTTPPORT=${4:-54321}
 ZOU=${ZOU:?set ZOU to the zou binary}
 PGBIN=${PGBIN:?set PGBIN to the patched pg bin directory}
 SECRET=${ZOU_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
-# `zou dev` runs initdb without -U, so the cluster superuser is whoever
-# started it rather than a role called postgres.
-PGUSER=${PGUSER:-$(id -un)}
+# `zou dev` names the cluster superuser rather than taking it from the
+# account that started the process, so it is postgres here and postgres
+# on a box where the runs happen to be driven as somebody else. It is
+# `SUPERUSER` in crates/zou/src/dev.rs, and it is named there so a store
+# one command initialised can be opened by the other.
+PGUSER=${PGUSER:-postgres}
 
 mkdir -p "$RUNDIR" "$STORE"
 ZOU_JWT_SECRET=$SECRET nohup "$ZOU" dev "$STORE" \

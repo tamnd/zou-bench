@@ -70,7 +70,7 @@ ZOU=/path/to/zou PGBIN=/path/to/pg/bin scripts/start-zou-dev.sh /tmp/zoudev
 ./zoubench rest scenarios/rest-warm-reads.json \
     --url http://127.0.0.1:54321/rest/v1 --label zou-rest \
     --jwt-secret super-secret-jwt-token-with-at-least-32-characters-long \
-    --dsn "host=127.0.0.1 port=54311 dbname=postgres user=$(id -un)" \
+    --dsn "host=127.0.0.1 port=54311 dbname=postgres user=postgres" \
     --datadir /tmp/zoudev/runtime/pgdata --zoustats /tmp/zoudev/runtime/store-stats
 ```
 
