@@ -209,3 +209,104 @@ func TestReportCarriesCommitSteps(t *testing.T) {
 		t.Fatal("commit samples leaked into the page service phases")
 	}
 }
+
+// The park causes and the gap histogram sit past the commit steps, and
+// they are the two counters that separate a page service which is
+// behind from one being asked for a position nothing has reached. A
+// decode that got the base wrong would read them out of the commit
+// steps and report a plausible number.
+func TestReportCarriesParkCausesAndGap(t *testing.T) {
+	c, err := Read(write(t, func(c *Counters) {
+		c[causeBase+0] = 7   // touched
+		c[causeBase+1] = 120 // untouched
+		c[gapBase] = 127
+		c[gapBase+1+20] = 127 // 1 to 2 MiB of wal ahead
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := Report(c)
+	cause, ok := rep["park_cause"].(map[string]any)
+	if !ok {
+		t.Fatal("no park_cause block")
+	}
+	if cause["touched"].(uint64) != 7 || cause["untouched"].(uint64) != 120 {
+		t.Fatalf("park causes wrong: %v", cause)
+	}
+	if _, there := cause["unclear"]; there {
+		t.Fatal("a cause nothing hit was reported")
+	}
+	gap, ok := rep["park_gap"].(map[string]any)
+	if !ok {
+		t.Fatal("no park_gap block")
+	}
+	if gap["samples"].(uint64) != 127 {
+		t.Fatalf("gap samples %v", gap["samples"])
+	}
+	if p50 := gap["p50_bytes"].(uint64); p50 != 1<<21 {
+		t.Fatalf("gap p50 %d bytes", p50)
+	}
+	if _, wrongUnit := gap["p50_us"]; wrongUnit {
+		t.Fatal("wal bytes reported under a microsecond heading")
+	}
+	if _, spilled := rep["commit"]; spilled {
+		t.Fatal("park counters leaked into the commit steps")
+	}
+}
+
+// A put that was slow because the bucket asked for less traffic and a
+// put that was slow because the object was large are the same latency
+// bucket, and this is the only counter that tells them apart.
+func TestReportCarriesRetriesAndPacking(t *testing.T) {
+	c, err := Read(write(t, func(c *Counters) {
+		c[retryBase+0] = 44 // throttle
+		c[retryBase+3] = 1  // exhausted
+		c[packSlot(0)] = 4000
+		c[packSlot(0)+1] = 1000
+		c[packSlot(1)] = 900
+		c[packSlot(1)+1] = 900 // wal frames that did not compress
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := Report(c)
+	retry, ok := rep["retries"].(map[string]any)
+	if !ok {
+		t.Fatal("no retries block")
+	}
+	if retry["throttle"].(uint64) != 44 || retry["exhausted"].(uint64) != 1 {
+		t.Fatalf("retries wrong: %v", retry)
+	}
+	if _, there := retry["server"]; there {
+		t.Fatal("a retry reason nothing hit was reported")
+	}
+	packed, ok := rep["packed"].(map[string]any)
+	if !ok {
+		t.Fatal("no packed block")
+	}
+	layer := packed["layer"].(map[string]any)
+	if layer["raw_bytes"].(uint64) != 4000 || layer["ratio"].(float64) != 4 {
+		t.Fatalf("layer packing wrong: %v", layer)
+	}
+	if ratio := packed["wal"].(map[string]any)["ratio"].(float64); ratio != 1 {
+		t.Fatalf("incompressible wal reported a ratio of %v rather than one", ratio)
+	}
+	if _, there := packed["file"]; there {
+		t.Fatal("a compressor caller with no traffic was reported")
+	}
+}
+
+// The layout is written on the other side of a language boundary, in
+// crates/zou-store/src/stats.rs, and nothing in a Go build checks it.
+// So the total is pinned here: a section that grows or moves over
+// there changes this number, and a reader that agrees on the format
+// byte while disagreeing on where the sections start decodes garbage
+// that looks like measurements.
+func TestSlotCountMatchesTheRustLayout(t *testing.T) {
+	if slots != 830 {
+		t.Fatalf("layout is %d slots, zou format 8 is 830", slots)
+	}
+	if packSlot(packs-1)+1 != slots-1 {
+		t.Fatal("the last section does not end at the last slot")
+	}
+}

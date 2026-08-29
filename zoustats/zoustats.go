@@ -1,16 +1,24 @@
 // Package zoustats reads the store op counter file zou keeps when
-// ZOU_STORE_STATS is set, format 4 from crates/zou-store/src/stats.rs.
+// ZOU_STORE_STATS is set, format 8 from crates/zou-store/src/stats.rs.
 //
 // The file is little endian u64 slots behind a magic and format
 // header: count and bytes per op kind and key class, a power of two
 // microsecond latency histogram per op kind, io errors per kind, one
 // CAS conflict counter, per read tier the smgr call count, page count,
 // and call latency histogram, per page service phase a sample count
-// and its own histogram, and per commit path step the same pair.
-// Counters accumulate for the life of one zou boot, so the harness
-// snapshots the file before and after a run and works on the
+// and its own histogram, per commit path step the same pair, a count
+// per park cause, one histogram of how much wal a park was waiting on,
+// a count per retry reason, and raw and stored bytes per compressor
+// caller. Counters accumulate for the life of one zou boot, so the
+// harness snapshots the file before and after a run and works on the
 // difference. Reading is a plain cold file read, it never disturbs the
 // live counters.
+//
+// The format number is checked rather than tolerated. A layout that
+// grew a section in the middle decodes to plausible garbage under an
+// older reader, and a wrong latency histogram is worse than no
+// histogram, so a file from a binary this reader does not know is
+// refused and the run says so.
 //
 // The tiers say where a page came from, the phases say what the wait
 // was made of. A read the page service answered is one tier sample at
@@ -18,6 +26,33 @@
 // spent waiting on ingest plus a read sample for the read itself. The
 // ingest phase is the serve loop doing something other than answering,
 // which is every queued reader's latency.
+//
+// The park causes say which of two opposite problems a park was. A
+// backend asks for a page at the position its own wal pusher has made
+// durable, which is a position for the whole tenant, so a read either
+// waited for wal that wrote the pages it asked for, which only ingest
+// speed fixes, or for wal that wrote something else, which wants a per
+// block position instead and no amount of ingest speed helps. The park
+// gap histogram is the other half of that: park latency says how long
+// the wait was, the gap says how many wal bytes it was for, and a
+// service that is behind and a service that is idle and being asked
+// for a position nothing has reached have the same park latency.
+//
+// The retry counts say why a request went out again, which the op
+// latency histogram cannot: a put that took two seconds because the
+// bucket asked for less traffic and a put that took two seconds
+// because the object was large are the same bucket and two different
+// problems. They are counted inside the backend, under the wrapper
+// that counts ops, so one logical op that was retried four times is
+// one op and four retries, which is also why the cost line bills the
+// op and reports the retries as unbilled.
+//
+// The compressor counts are the one thing about the store nothing
+// outside it can measure. A block that does not compress is stored
+// raw, so the object sizes a bucket reports are stored sizes and
+// nothing out there knows what those bytes would have been, which
+// means a space amplification figure computed from the outside quietly
+// credits the engine for compression it may not be getting.
 //
 // The commit steps say what a commit's wait was made of, from the
 // pusher picking WAL up to the durable watermark passing it: push is
@@ -40,15 +75,21 @@ import (
 var opNames = [6]string{"get", "get_range", "put_if_match", "put", "delete", "list"}
 var classNames = [7]string{"manifest", "wal", "chk", "shards", "page", "file", "other"}
 var tierNames = [4]string{"cache", "local", "store", "service"}
-var phaseNames = [3]string{"park", "read", "ingest"}
+var phaseNames = [4]string{"park", "read", "ingest", "queue"}
 var stepNames = [7]string{"push", "stage", "window", "dispatch", "put", "ack", "durable"}
+var causeNames = [3]string{"touched", "untouched", "unclear"}
+var retryNames = [4]string{"throttle", "server", "transport", "exhausted"}
+var packNames = [3]string{"layer", "wal", "file"}
 
 const (
 	kinds        = 6
 	classes      = 7
 	tiers        = 4
-	phases       = 3
+	phases       = 4
 	steps        = 7
+	causes       = 3
+	retries      = 4
+	packs        = 3
 	buckets      = 32
 	header       = 2
 	bucketBase   = header + kinds*classes*2
@@ -57,8 +98,12 @@ const (
 	tierBase     = conflictSlot + 1
 	phaseBase    = tierBase + tiers*(2+buckets)
 	stepBase     = phaseBase + phases*(1+buckets)
-	slots        = stepBase + steps*(1+buckets)
-	format       = 4
+	causeBase    = stepBase + steps*(1+buckets)
+	gapBase      = causeBase + causes
+	retryBase    = gapBase + 1 + buckets
+	packBase     = retryBase + retries
+	slots        = packBase + packs*2
+	format       = 8
 )
 
 var magic = binary.LittleEndian.Uint64([]byte("ZOUSTATS"))
@@ -70,8 +115,9 @@ func countSlot(kind, class int) int { return header + (kind*classes+class)*2 }
 func tierSlot(tier int) int         { return tierBase + tier*(2+buckets) }
 func phaseSlot(phase int) int       { return phaseBase + phase*(1+buckets) }
 func stepSlot(step int) int         { return stepBase + step*(1+buckets) }
+func packSlot(pack int) int         { return packBase + pack*2 }
 
-// Read decodes a counter file, refusing anything that is not format 4.
+// Read decodes a counter file, refusing anything that is not format 8.
 func Read(path string) (Counters, error) {
 	var c Counters
 	raw, err := os.ReadFile(path)
@@ -182,6 +228,46 @@ func Report(c Counters) map[string]any {
 			"p99_us":  percentile(hist, samples, 0.99),
 		}
 	}
+	parkCause := map[string]any{}
+	for cause, name := range causeNames {
+		if n := c[causeBase+cause]; n > 0 {
+			parkCause[name] = n
+		}
+	}
+	// The gap histogram is wal bytes rather than microseconds, so its
+	// percentiles are bucket upper bounds in bytes and are named that
+	// way. Same buckets, different unit, and a column headed us that
+	// holds bytes is how a report starts lying.
+	var parkGap map[string]any
+	if samples := c[gapBase]; samples > 0 {
+		hist := c[gapBase+1 : gapBase+1+buckets]
+		parkGap = map[string]any{
+			"samples":   samples,
+			"p50_bytes": percentile(hist, samples, 0.50),
+			"p95_bytes": percentile(hist, samples, 0.95),
+			"p99_bytes": percentile(hist, samples, 0.99),
+		}
+	}
+	retry := map[string]any{}
+	for kind, name := range retryNames {
+		if n := c[retryBase+kind]; n > 0 {
+			retry[name] = n
+		}
+	}
+	packed := map[string]any{}
+	for pack, name := range packNames {
+		raw := c[packSlot(pack)]
+		if raw == 0 {
+			continue
+		}
+		stored := c[packSlot(pack)+1]
+		block := map[string]any{"raw_bytes": raw, "stored_bytes": stored}
+		if stored > 0 {
+			block["ratio"] = round3(float64(raw) / float64(stored))
+		}
+		packed[name] = block
+	}
+
 	out := map[string]any{"ops": ops, "cas_conflicts": c[conflictSlot]}
 	if len(reads) > 0 {
 		out["reads"] = reads
@@ -192,8 +278,22 @@ func Report(c Counters) map[string]any {
 	if len(commit) > 0 {
 		out["commit"] = commit
 	}
+	if len(parkCause) > 0 {
+		out["park_cause"] = parkCause
+	}
+	if parkGap != nil {
+		out["park_gap"] = parkGap
+	}
+	if len(retry) > 0 {
+		out["retries"] = retry
+	}
+	if len(packed) > 0 {
+		out["packed"] = packed
+	}
 	return out
 }
+
+func round3(v float64) float64 { return float64(int(v*1000+0.5)) / 1000 }
 
 // Totals sums the counters into the op classes a price card bills:
 // every put kind is a billable write, get and get_range are billable
