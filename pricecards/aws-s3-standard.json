@@ -1,14 +1,17 @@
 {
   "name": "aws-s3-standard",
-  "source": "https://aws.amazon.com/s3/pricing/",
-  "dated": "2026-08-01",
-  "kind": "retail",
-  "storage_gb_month_usd": 0.023,
-  "put_per_1000_usd": 0.005,
-  "get_per_1000_usd": 0.0004,
-  "list_per_1000_usd": 0.005,
-  "delete_per_1000_usd": 0,
-  "egress_per_gb_usd": 0.09,
-  "min_storage_days": 0,
-  "notes": "us-east-1 first tier, verify against source before publishing any dollar figure"
+  "as_of": "2026-08-29",
+  "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/us-east-1/index.json",
+  "note": "us-east-1, first 50 TB. DELETE is free. 5xx responses are not billed, so the throttle and server retries below are not in the request count.",
+  "gb_bytes": 1073741824.0,
+  "storage_per_gb_month": 0.023,
+  "class_a_per_million": 5.0,
+  "class_b_per_million": 0.4,
+  "delete_per_million": 0.0,
+  "upload_per_gb": 0.0,
+  "retrieval_per_gb": 0.0,
+  "egress_per_gb": 0.09,
+  "egress_free_gb_month": 100.0,
+  "egress_free_times_storage": 0.0,
+  "needs_box": false
 }

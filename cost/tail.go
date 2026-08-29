@@ -38,10 +38,7 @@ func (o Ops) add(b Ops) Ops {
 }
 
 func (o Ops) usd(c Card) float64 {
-	return o.Puts/1000*c.PutPer1000 +
-		o.Gets/1000*c.GetPer1000 +
-		o.Lists/1000*c.ListPer1000 +
-		o.Deletes/1000*c.DeletePer1000
+	return requests(c, int64(o.Puts), int64(o.Gets), int64(o.Lists), int64(o.Deletes))
 }
 
 // Tail is a deployment to price: how many projects there are, how many
@@ -79,16 +76,13 @@ func Monthly(c Card, t Tail) map[string]any {
 	ops := t.DormantPerHour.
 		add(t.AttachedPerProjectHour.scale(float64(t.AttachedAtOnce))).
 		scale(HoursPerMonth)
-	storageGB := float64(t.StorageBytes) / gb
-	storage := storageGB * c.StorageGBMonth
-	if c.Kind == "selfhosted" && c.CapacityGB > 0 {
-		storage = storageGB / c.CapacityGB * c.BoxUSDMonth
-	}
+	storageGB := float64(t.StorageBytes) / c.GBBytes
+	storage := storageGB * c.StoragePerGBMonth
 	opsUSD := ops.usd(c)
 	total := storage + opsUSD + t.BoxUSDMonth
 	out := map[string]any{
 		"card":              c.Name,
-		"card_dated":        c.Dated,
+		"card_dated":        c.AsOf,
 		"projects":          t.Projects,
 		"attached_at_once":  t.AttachedAtOnce,
 		"storage_gb":        round4(storageGB),

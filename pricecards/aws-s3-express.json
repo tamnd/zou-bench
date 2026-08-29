@@ -1,0 +1,17 @@
+{
+  "name": "aws-s3-express",
+  "as_of": "2026-08-29",
+  "source": "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/us-east-1/index.json",
+  "note": "us-east-1 directory buckets. Requests are a quarter of Standard and storage is nearly five times it, and bytes are charged on top of both, so this is the card where a run of many small objects and a run of few large ones stop agreeing. Objects have a one hour minimum billing time, which nothing here models.",
+  "gb_bytes": 1073741824.0,
+  "storage_per_gb_month": 0.11,
+  "class_a_per_million": 1.13,
+  "class_b_per_million": 0.03,
+  "delete_per_million": 0.0,
+  "upload_per_gb": 0.0032,
+  "retrieval_per_gb": 0.0006,
+  "egress_per_gb": 0.09,
+  "egress_free_gb_month": 100.0,
+  "egress_free_times_storage": 0.0,
+  "needs_box": false
+}

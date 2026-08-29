@@ -1,14 +1,17 @@
 {
   "name": "wasabi",
-  "source": "https://wasabi.com/pricing",
-  "dated": "2026-08-01",
-  "kind": "retail",
-  "storage_gb_month_usd": 0.00699,
-  "put_per_1000_usd": 0,
-  "get_per_1000_usd": 0,
-  "list_per_1000_usd": 0,
-  "delete_per_1000_usd": 0,
-  "egress_per_gb_usd": 0,
-  "min_storage_days": 90,
-  "notes": "no api or egress fees under fair use, 90 day minimum storage, verify before publishing"
+  "as_of": "2026-08-29",
+  "source": "https://wasabi.com/cloud-storage-pricing",
+  "note": "7.99 per TB per month, no request and no egress charges at all, which makes this the one card where the shape of the workload does not affect the bill and only the footprint does. The 90 day minimum retention and the monthly minimum are not modelled.",
+  "gb_bytes": 1073741824.0,
+  "storage_per_gb_month": 0.007802734375,
+  "class_a_per_million": 0.0,
+  "class_b_per_million": 0.0,
+  "delete_per_million": 0.0,
+  "upload_per_gb": 0.0,
+  "retrieval_per_gb": 0.0,
+  "egress_per_gb": 0.0,
+  "egress_free_gb_month": 0.0,
+  "egress_free_times_storage": 0.0,
+  "needs_box": false
 }
