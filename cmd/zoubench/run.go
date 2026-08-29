@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -232,7 +234,18 @@ func cmdRun(argv []string) {
 
 	die(os.MkdirAll(*outdir, 0o755))
 	stamp := strings.NewReplacer(":", "", "-", "").Replace(result["date"].(string))[:15]
-	path := filepath.Join(*outdir, fmt.Sprintf("%s-%s-%s.json", sc.Name, *label, stamp))
+	stem := fmt.Sprintf("%s-%s-%s", sc.Name, *label, stamp)
+	// The per transaction logs, kept rather than thrown away with the
+	// temporary directory they were written into. The percentiles above
+	// are computed from them and cannot be recomputed without them, so
+	// a published tail whose logs are gone is a number nobody can check
+	// and a bucket width nobody can change their mind about. Compressed
+	// because they are one line a transaction and compress about ten to
+	// one, which is what makes keeping them affordable.
+	if logs := filepath.Join(*outdir, stem+".txnlog.tar.gz"); keepLogs(logdir, logs) == nil {
+		result["txn_log"] = filepath.Base(logs)
+	}
+	path := filepath.Join(*outdir, stem+".json")
 	out, err := json.MarshalIndent(result, "", "  ")
 	die(err)
 	die(os.WriteFile(path, out, 0o644))
@@ -331,4 +344,55 @@ func die(err error) {
 		fmt.Fprintln(os.Stderr, "zoubench:", err)
 		os.Exit(1)
 	}
+}
+
+// keepLogs archives a directory of pgbench per transaction logs next to
+// the result they belong to.
+//
+// It returns an error rather than dying on one: a run that produced
+// real numbers and could not write its logs should still write its
+// numbers, and the caller records the archive in the result only when
+// there is one. An empty directory, which is what a scenario with the
+// transaction log turned off leaves, is not an archive worth writing.
+func keepLogs(dir, dest string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		if err == nil {
+			err = fmt.Errorf("%s: no per transaction logs", dir)
+		}
+		return err
+	}
+	f, err := os.Create(dest)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	zw := gzip.NewWriter(f)
+	tw := tar.NewWriter(zw)
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil || info.IsDir() {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return err
+		}
+		hdr := &tar.Header{
+			Name:    e.Name(),
+			Mode:    0o644,
+			Size:    int64(len(body)),
+			ModTime: info.ModTime(),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if _, err := tw.Write(body); err != nil {
+			return err
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	return zw.Close()
 }
