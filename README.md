@@ -38,6 +38,8 @@ From pgbench: tps, average latency and stddev, initial connection time, transact
 
 From the per transaction log (`-l`): real latency percentiles p50, p90, p95, p99, p999, max, mean, and stddev over every transaction, plus 30 second buckets with per bucket tps, p50, and p99 so a flat average cannot hide a stall.
 
+Those logs are then kept, as `<result stem>.txnlog.tar.gz` next to the result json, with one file per pgbench thread the way pgbench wrote them. The percentiles above are computed from them and cannot be recomputed without them, so a published tail whose logs went out with a temporary directory is a number nobody can check and a bucket width nobody can change their mind about later. They compress about ten to one, which is what makes keeping them affordable at a few hundred thousand transactions a run.
+
 From the server process tree, sampled when `--datadir` names a local server: process count, RSS peak and median across the whole tree, an RSS timeline and its slope in kb per minute for leak detection, cumulative CPU seconds, major page faults, and process level disk read and write bytes on Linux via /proc.
 
 From the whole system on Linux, sampled every second: per device disk reads, writes, and utilization, network bytes in and out, page cache growth, swap in and out, and a disk write timeline. On other platforms this block says supported false instead of inventing zeros.
