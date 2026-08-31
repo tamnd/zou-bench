@@ -98,6 +98,13 @@ type Usage struct {
 	// million transactions, the number that decides whether a design
 	// is cheap.
 	Txns int64
+	// Commits is what postgres itself committed over the same window,
+	// read off pg_stat_database rather than off the driver, which is
+	// what makes the dollars per million commits line a counter and not
+	// the client's opinion of one. It is deliberately not the same
+	// number as Txns: a transaction the driver retried is one commit
+	// and two transactions, and the server commits some of its own.
+	Commits int64
 	// Bytes the workload ingested, for the dollars per GB ingested line
 	// M1b asks for. This is the store's growth over the run rather than
 	// everything written to it, since a page rewritten ten times was
@@ -184,12 +191,15 @@ func Compute(c Card, u Usage) map[string]any {
 	// month and the run was not a month. It prints beside the total
 	// rather than inside it.
 	//
-	// The two per unit lines below are each omitted rather than printed
-	// as zero when their divisor was not measured, since dollars per
+	// The per unit lines below are each omitted rather than printed as
+	// zero when their divisor was not measured, since dollars per
 	// transaction for a run whose transactions nobody counted is a
 	// division by an assumption.
 	if u.Txns > 0 {
 		out["usd_per_million_txns"] = round4(work / float64(u.Txns) * 1e6)
+	}
+	if u.Commits > 0 {
+		out["usd_per_million_commits"] = round4(work / float64(u.Commits) * 1e6)
 	}
 	if u.IngestedBytes > 0 {
 		out["usd_per_gb_ingested"] = round4(work / (float64(u.IngestedBytes) / c.GBBytes))
