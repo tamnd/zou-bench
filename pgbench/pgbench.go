@@ -7,6 +7,7 @@ package pgbench
 import (
 	"math"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -47,6 +48,58 @@ func DSNArgs(dsn string) []string {
 		db = "postgres"
 	}
 	return append(args, db)
+}
+
+// DSNParts turns the same DSN into what a client that speaks the wire
+// protocol itself needs: an address to dial, a role, and a database.
+// The address is a host:port pair, or the socket path when the DSN
+// names a directory rather than a host, which is how libpq reads it too.
+// A DSN that names no role gets the operating system account, again the
+// way libpq reads it: the baseline scenarios connect over a socket as
+// whoever is running them and never spell a user out, and a startup
+// packet with no user in it is refused before the first statement.
+func DSNParts(dsn string) (addr, user, database string) {
+	kv := map[string]string{}
+	for _, part := range strings.Fields(dsn) {
+		if k, v, ok := strings.Cut(part, "="); ok {
+			kv[k] = v
+		}
+	}
+	host, port := kv["host"], kv["port"]
+	if port == "" {
+		port = "5432"
+	}
+	if strings.ContainsAny(host, `/\`) {
+		addr = filepath.Join(host, ".s.PGSQL."+port)
+	} else {
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		addr = host + ":" + port
+	}
+	database = kv["dbname"]
+	if database == "" {
+		database = "postgres"
+	}
+	user = kv["user"]
+	if user == "" {
+		user = osUser()
+	}
+	return addr, user, database
+}
+
+// osUser is the account the harness is running as, which is what libpq
+// falls back to. PGUSER first, then the account itself, then the name
+// every postgres has a role for, so a lookup that fails on a box
+// without a passwd entry still produces a connectable name.
+func osUser() string {
+	if v := os.Getenv("PGUSER"); v != "" {
+		return v
+	}
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return "postgres"
 }
 
 var summaryPatterns = []struct {

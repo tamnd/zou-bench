@@ -195,6 +195,34 @@
       "host": "GamingPC",
       "date": "2026-08-11T23:20:22Z",
       "source": "fleet-800-idle-zou-fleet-800-idle-20260811T232022.json"
+    },
+    "stmt-100-accounts-update-localfs": {
+      "value": 0.551,
+      "label": "zou-localfs",
+      "host": "GamingPC",
+      "date": "2026-08-31T06:32:54Z",
+      "source": "tpcb-scale100-wire-zou-localfs-20260831T063254.json"
+    },
+    "stmt-100-accounts-update-pg18": {
+      "value": 0.292,
+      "label": "pg18",
+      "host": "GamingPC",
+      "date": "2026-08-31T06:36:16Z",
+      "source": "tpcb-scale100-wire-pg18-20260831T063616.json"
+    },
+    "stmt-100-commit-localfs": {
+      "value": 26.17,
+      "label": "zou-localfs",
+      "host": "GamingPC",
+      "date": "2026-08-31T06:32:54Z",
+      "source": "tpcb-scale100-wire-zou-localfs-20260831T063254.json"
+    },
+    "stmt-100-commit-pg18": {
+      "value": 4.082,
+      "label": "pg18",
+      "host": "GamingPC",
+      "date": "2026-08-31T06:36:16Z",
+      "source": "tpcb-scale100-wire-pg18-20260831T063616.json"
     }
   }
 }

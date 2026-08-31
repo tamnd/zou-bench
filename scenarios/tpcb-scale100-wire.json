@@ -1,0 +1,10 @@
+{
+  "name": "tpcb-scale100-wire",
+  "driver": "wire",
+  "init": true,
+  "scale": 100,
+  "clients": 8,
+  "threads": 8,
+  "duration": 60,
+  "builtin": "tpcb-like"
+}

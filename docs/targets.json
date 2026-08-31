@@ -337,5 +337,55 @@
     "compare": "",
     "target": 0,
     "earns": "context for the row above it, the parked read"
+  },
+  {
+    "id": "stmt-100-accounts-update-localfs",
+    "group": "Statement tail",
+    "claim": "The account update inside the transaction, zou on a filesystem store",
+    "scenario": "tpcb-scale100-wire",
+    "label": "zou-localfs",
+    "path": "statement_ms.accounts update.p99",
+    "unit": "ms",
+    "compare": "<=",
+    "target": 25,
+    "earns": "zou#31 freshness barrier cost bounded, accounts update p99 under 25 ms at scale 100 with 8 writers on local fs",
+    "note": "This group is driven by the harness rather than by pgbench, because pgbench reports per statement latencies as means only and a bound on one statement's tail cannot be read off a mean."
+  },
+  {
+    "id": "stmt-100-commit-localfs",
+    "group": "Statement tail",
+    "claim": "The commit inside the same transaction, zou on a filesystem store",
+    "scenario": "tpcb-scale100-wire",
+    "label": "zou-localfs",
+    "path": "statement_ms.end.p99",
+    "unit": "ms",
+    "compare": "",
+    "target": 0,
+    "earns": "context for the row above, where the time actually goes",
+    "note": "The line above is met by a factor of 45 and this row is why that is not the whole story: 26 of the 31 ms at the transaction p99 are the commit, and the five statements before it cost under 1 ms each at the same percentile."
+  },
+  {
+    "id": "stmt-100-accounts-update-pg18",
+    "group": "Statement tail",
+    "claim": "The same account update on vanilla Postgres 18",
+    "scenario": "tpcb-scale100-wire",
+    "label": "pg18",
+    "path": "statement_ms.accounts update.p99",
+    "unit": "ms",
+    "compare": "",
+    "target": 0,
+    "earns": "context for the first row, the same statement without zou under it"
+  },
+  {
+    "id": "stmt-100-commit-pg18",
+    "group": "Statement tail",
+    "claim": "The same commit on vanilla Postgres 18",
+    "scenario": "tpcb-scale100-wire",
+    "label": "pg18",
+    "path": "statement_ms.end.p99",
+    "unit": "ms",
+    "compare": "",
+    "target": 0,
+    "earns": "context for the second row, the same commit without zou under it"
   }
 ]

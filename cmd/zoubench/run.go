@@ -20,6 +20,7 @@ import (
 	"github.com/tamnd/zou-bench/sampler"
 	"github.com/tamnd/zou-bench/scenario"
 	"github.com/tamnd/zou-bench/storefs"
+	"github.com/tamnd/zou-bench/tpcb"
 	"github.com/tamnd/zou-bench/zoustats"
 )
 
@@ -137,10 +138,19 @@ func cmdRun(argv []string) {
 		}
 	}
 
+	wireAddr, wireUser, wireDB := pgbench.DSNParts(*dsn)
 	if sc.Warmup > 0 {
-		warm := exec.Command(pgbench.Tool("pgbench"), append(benchArgs(sc, sc.Warmup, "", rest[0]), conn...)...)
-		warm.Stdout, warm.Stderr = os.Stderr, os.Stderr
-		die(warm.Run())
+		if sc.Driver == "wire" {
+			// The warmup has to be the workload it is warming, or the
+			// caches it fills are the wrong ones.
+			_, _, err := tpcb.Run(wireAddr, wireUser, wireDB, sc.Scale, sc.Clients,
+				time.Duration(sc.Warmup)*time.Second)
+			die(err)
+		} else {
+			warm := exec.Command(pgbench.Tool("pgbench"), append(benchArgs(sc, sc.Warmup, "", rest[0]), conn...)...)
+			warm.Stdout, warm.Stderr = os.Stderr, os.Stderr
+			die(warm.Run())
+		}
 	}
 
 	// The second mark, where the timed window starts. Everything the
@@ -163,19 +173,48 @@ func cmdRun(argv []string) {
 	die(err)
 	defer os.RemoveAll(logdir)
 
-	args := benchArgs(sc, sc.Duration, logdir, rest[0])
-	cmd := exec.Command(pgbench.Tool("pgbench"), append(args, conn...)...)
-	var stdout strings.Builder
-	cmd.Stdout, cmd.Stderr = &stdout, os.Stderr
-	die(cmd.Run())
+	var txns []pgbench.Txn
+	if sc.Driver == "wire" {
+		window := time.Duration(sc.Duration) * time.Second
+		started := time.Now()
+		wire, failed, err := tpcb.Run(wireAddr, wireUser, wireDB, sc.Scale, sc.Clients, window)
+		die(err)
+		elapsed := time.Since(started).Seconds()
+		txns = make([]pgbench.Txn, len(wire))
+		var sum float64
+		for i, t := range wire {
+			txns[i] = pgbench.Txn{LatencyMS: t.LatencyMS, Epoch: t.Epoch}
+			sum += t.LatencyMS
+		}
+		// The same keys pgbench's summary block fills, computed the same
+		// way, so a wire result and a pgbench result of the same
+		// scenario sit in one table without a footnote saying which
+		// column came from where.
+		result["transactions"] = len(wire)
+		result["failed"] = failed
+		if elapsed > 0 {
+			result["tps"] = round3(float64(len(wire)) / elapsed)
+		}
+		if len(wire) > 0 {
+			result["latency_avg_ms"] = round3(sum / float64(len(wire)))
+		}
+		result["statement_ms"] = tpcb.Percentiles(wire)
+		result["driver"] = "wire"
+	} else {
+		args := benchArgs(sc, sc.Duration, logdir, rest[0])
+		cmd := exec.Command(pgbench.Tool("pgbench"), append(args, conn...)...)
+		var stdout strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, os.Stderr
+		die(cmd.Run())
+		pgbench.ParseSummary(stdout.String(), result)
+		txns = pgbench.ParseTxnLogs(logdir)
+		result["raw_summary"] = stdout.String()
+	}
 
 	after := pgstats.Snapshot(psql, conn)
 
-	pgbench.ParseSummary(stdout.String(), result)
-	txns := pgbench.ParseTxnLogs(logdir)
 	result["latency_ms"] = pgbench.Percentiles(txns)
 	result["buckets_30s"] = pgbench.Buckets(txns, 30)
-	result["raw_summary"] = stdout.String()
 	if d := pgstats.Delta(before, after); len(d) > 0 {
 		result["pg_delta"] = d
 	}

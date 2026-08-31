@@ -31,6 +31,14 @@ type Scenario struct {
 	// instead, relative to the scenario file.
 	Builtin string `json:"builtin"`
 	Script  string `json:"script"`
+	// Driver is pgbench when empty, or wire for the in process client
+	// that sends the same tpcb-like transaction and times every
+	// statement in it. pgbench reports per statement latencies as means
+	// only, so a bound on one statement's tail cannot be read off a
+	// pgbench run at all. The wire driver runs the same shape and is
+	// otherwise the slower of the two, so it is asked for by name
+	// rather than being what a scenario gets by default.
+	Driver string `json:"driver"`
 	// Rate caps throughput in transactions per second, 0 is unlimited.
 	// Rate limited runs measure latency at a fixed load, which is the
 	// honest way to compare tail latency across systems.
@@ -265,6 +273,26 @@ func Load(path string) (Scenario, map[string]any, error) {
 		if sc.Port == 0 {
 			sc.Port = 5497
 		}
+	}
+	// The wire driver knows one transaction, which is the one it exists
+	// to time. A scenario that names another workload and this driver
+	// is asking for something it will not get, and it is cheaper to
+	// hear that now than to read a result file later and wonder which
+	// of the two the numbers came from.
+	switch sc.Driver {
+	case "", "pgbench":
+	case "wire":
+		if sc.Script != "" {
+			return Scenario{}, nil, fmt.Errorf("%s: the wire driver runs tpcb-like, not the script %s", path, sc.Script)
+		}
+		if sc.Builtin != "" && sc.Builtin != "tpcb-like" {
+			return Scenario{}, nil, fmt.Errorf("%s: the wire driver runs tpcb-like, not %s", path, sc.Builtin)
+		}
+		if sc.Rate > 0 {
+			return Scenario{}, nil, fmt.Errorf("%s: the wire driver does not pace itself, so it cannot hold a rate of %d", path, sc.Rate)
+		}
+	default:
+		return Scenario{}, nil, fmt.Errorf("%s: unknown driver %q", path, sc.Driver)
 	}
 	if sc.Clients == 0 {
 		sc.Clients = 8

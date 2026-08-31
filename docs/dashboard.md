@@ -10,7 +10,7 @@ A claim nothing has measured yet says so instead of being left off, and a headli
 
 ## Where it stands
 
-4 of 7 claims met, 3 missed, 0 simulated, 0 not measured yet, and 21 numbers reported without a line.
+5 of 8 claims met, 3 missed, 0 simulated, 0 not measured yet, and 24 numbers reported without a line.
 
 ## Cold attach
 
@@ -78,6 +78,18 @@ The three write mix rows are one run each on gamingpc, 8 clients, 60 s, the data
 Write amplification is the row to read first. A pgbench transaction produces about 575 bytes of WAL and this store wrote 78 KiB for each one on the filesystem leg and 109 KiB on MinIO, nearly all of it whole shard objects rewritten because part of one changed. That is a layout cost rather than a workload cost, which is why the dollars per million row below moves with it.
 Both dollar rows are the measured op counts priced on aws-s3-standard, so they say what these runs would have cost against a real bucket. The two legs ran the same binary on the same workload and one costs 3.4x the other, entirely because it issued 9.3x the requests, which is tamnd/zou#741.
 
+## Statement tail
+
+| claim | line | measured | | where | when | earns |
+| --- | --- | ---: | --- | --- | --- | --- |
+| The account update inside the transaction, zou on a filesystem store | <= 25 ms | 0.551 ms | met | zou-localfs on GamingPC | 2026-08-31 | zou#31 freshness barrier cost bounded, accounts update p99 under 25 ms at scale 100 with 8 writers on local fs |
+| The commit inside the same transaction, zou on a filesystem store | no line | 26.17 ms | reported | zou-localfs on GamingPC | 2026-08-31 | context for the row above, where the time actually goes |
+| The same account update on vanilla Postgres 18 | no line | 0.292 ms | reported | pg18 on GamingPC | 2026-08-31 | context for the first row, the same statement without zou under it |
+| The same commit on vanilla Postgres 18 | no line | 4.082 ms | reported | pg18 on GamingPC | 2026-08-31 | context for the second row, the same commit without zou under it |
+
+This group is driven by the harness rather than by pgbench, because pgbench reports per statement latencies as means only and a bound on one statement's tail cannot be read off a mean.
+The line above is met by a factor of 45 and this row is why that is not the whole story: 26 of the 31 ms at the transaction p99 are the commit, and the five statements before it cost under 1 ms each at the same percentile.
+
 ## Where the numbers came from
 
 - `cold-attach-zou-localfs-gamingpc-20260806T182641.json`
@@ -88,5 +100,7 @@ Both dollar rows are the measured op counts priced on aws-s3-standard, so they s
 - `select-scale100-zou-localfs-20260831T051533.json`
 - `select-scale100-zou-minio-20260831T050737.json`
 - `tpcb-scale100-pg18-20260831T051051.json`
+- `tpcb-scale100-wire-pg18-20260831T063616.json`
+- `tpcb-scale100-wire-zou-localfs-20260831T063254.json`
 - `tpcb-scale100-zou-localfs-20260831T051417.json`
 - `tpcb-scale100-zou-minio-20260831T050605.json`

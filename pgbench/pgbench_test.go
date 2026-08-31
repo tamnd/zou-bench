@@ -110,3 +110,45 @@ func itoa64(n int64) string {
 	}
 	return string(digits)
 }
+
+func TestDSNPartsReadsWhatAWireClientNeeds(t *testing.T) {
+	addr, user, db := DSNParts("host=127.0.0.1 port=54311 dbname=postgres user=zoubench")
+	if addr != "127.0.0.1:54311" || user != "zoubench" || db != "postgres" {
+		t.Fatalf("got %q %q %q", addr, user, db)
+	}
+	// A host that is a directory is a socket directory, the way libpq
+	// reads it, and the port names the file inside it rather than a
+	// tcp port.
+	addr, _, _ = DSNParts("host=/tmp/zou port=5497")
+	if addr != filepath.Join("/tmp/zou", ".s.PGSQL.5497") {
+		t.Fatalf("socket path %q", addr)
+	}
+	// The defaults are libpq's, so a DSN that names only a port still
+	// dials somewhere rather than dialing ":5432".
+	addr, _, db = DSNParts("port=6000")
+	if addr != "127.0.0.1:6000" || db != "postgres" {
+		t.Fatalf("got %q %q", addr, db)
+	}
+}
+
+func TestADSNWithNoRoleGetsTheAccountRunningIt(t *testing.T) {
+	// The baseline scenarios connect over a socket and never name a
+	// user, because pgbench and psql take the account for granted. A
+	// wire client has to spell it out: a startup packet with an empty
+	// user is refused with "no PostgreSQL user name specified in
+	// startup packet" before a single statement is sent, which is what
+	// happened to the first vanilla leg of the scale 100 wire run.
+	t.Setenv("PGUSER", "someone")
+	if _, user, _ := DSNParts("host=/tmp/zou port=5432"); user != "someone" {
+		t.Fatalf("user %q, wanted the one PGUSER names", user)
+	}
+	t.Setenv("PGUSER", "")
+	_, user, _ := DSNParts("host=/tmp/zou port=5432")
+	if user == "" {
+		t.Fatal("no user at all, which the server refuses")
+	}
+	// An explicit user still wins over both.
+	if _, user, _ := DSNParts("host=/tmp/zou port=5432 user=zoubench"); user != "zoubench" {
+		t.Fatalf("user %q, wanted the one the DSN names", user)
+	}
+}
