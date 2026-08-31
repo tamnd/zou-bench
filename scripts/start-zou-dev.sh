@@ -1,7 +1,8 @@
 #!/bin/sh
 # Start `zou dev` with a fixed jwt secret and wait until the http api
-# answers, so a rest run does not measure a server that was still
-# opening its store. Usage: start-zou-dev.sh <rundir> [store] [pgport] [httpport]
+# answers and the postmaster takes a connection, so a run does not
+# measure, or fail against, a server that was still opening its store.
+# Usage: start-zou-dev.sh <rundir> [store] [pgport] [httpport]
 #
 # The secret is fixed on purpose: the harness mints its own tokens from
 # it, and a generated one would mean copying a key out of a log file
@@ -43,6 +44,27 @@ while [ "$i" -lt 600 ]; do
 done
 if [ "$code" = "000" ]; then
     echo "zou dev never answered on $HTTPPORT, see $RUNDIR/zou.log" >&2
+    exit 1
+fi
+
+# The http api answers before the postmaster does. It is up as soon as
+# the server process is listening, while the postmaster behind it is
+# still replaying the durable overlay and refuses every connection with
+# "the database system is not yet accepting connections". A pgbench run
+# started in that window dies on its first connection, which is how the
+# scale 100 MinIO leg of M1 line 58 was lost twice, so wait for the port
+# that the run actually uses as well as the one the rest runs use.
+j=0
+while [ "$j" -lt 1800 ]; do
+    if "$PGBIN/psql" -h 127.0.0.1 -p "$PGPORT" -U "$PGUSER" -d postgres \
+        -Atqc 'select 1' >/dev/null 2>&1; then
+        break
+    fi
+    j=$((j + 1))
+    sleep 1
+done
+if [ "$j" -ge 1800 ]; then
+    echo "postgres never accepted a connection on $PGPORT, see $RUNDIR/zou.log" >&2
     exit 1
 fi
 
