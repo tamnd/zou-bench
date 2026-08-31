@@ -10,7 +10,7 @@ A claim nothing has measured yet says so instead of being left off, and a headli
 
 ## Where it stands
 
-4 of 7 claims met, 3 missed, 0 simulated, 0 not measured yet, and 10 numbers reported without a line.
+4 of 7 claims met, 3 missed, 0 simulated, 0 not measured yet, and 21 numbers reported without a line.
 
 ## Cold attach
 
@@ -58,9 +58,35 @@ The dollars come from the hold phase only, because a month of this fleet is a mo
 The M1b line for an idle tenant is written per gigabyte and these projects hold tens of megabytes each, so this number is on the page as the shape of the bill rather than as that line being earned, which needs a fleet of gigabyte tenants.
 A dormant project costs nothing at all, so every dollar on this page is written by the hundred that stay attached, each of them putting an object every five seconds with nobody asking it for anything. That rate is the thing to fix, not the price card.
 
+## pgbench scale 100
+
+| claim | line | measured | | where | when | earns |
+| --- | --- | ---: | --- | --- | --- | --- |
+| Write mix, vanilla Postgres 18 on local disk | no line | 1553 tps | reported | pg18 on GamingPC | 2026-08-31 | zou#1 line 58, the first scale 100 table |
+| Write mix, zou on a filesystem store | no line | 763.5 tps | reported | zou-localfs on GamingPC | 2026-08-31 | zou#1 line 58, the first scale 100 table |
+| Write mix, zou on MinIO | no line | 842.1 tps | reported | zou-minio on GamingPC | 2026-08-31 | zou#1 line 58, the local fs and MinIO legs of it |
+| Read only mix, vanilla Postgres 18 on local disk | no line | 102007 tps | reported | pg18 on GamingPC | 2026-08-31 | zou#1 line 58, the first scale 100 table |
+| Read only mix, zou on a filesystem store | no line | 36660 tps | reported | zou-localfs on GamingPC | 2026-08-31 | zou#1 line 58, the first scale 100 table |
+| Read only mix, zou on MinIO | no line | 34043 tps | reported | zou-minio on GamingPC | 2026-08-31 | zou#1 line 58, the local fs and MinIO legs of it |
+| Store bytes written per WAL byte, filesystem store | no line | 138.1 x | reported | zou-localfs on GamingPC | 2026-08-31 | zou#62, the amplification storage v2 exists to fix |
+| Store bytes written per WAL byte, MinIO | no line | 194.9 x | reported | zou-minio on GamingPC | 2026-08-31 | zou#62, the amplification storage v2 exists to fix |
+| Dollars a million transactions, filesystem store on the S3 card | no line | 2.762 usd | reported | zou-localfs on GamingPC | 2026-08-31 | zou#31 line 57, dollars per million commits |
+| Dollars a million transactions, MinIO on the S3 card | no line | 0.816 usd | reported | zou-minio on GamingPC | 2026-08-31 | zou#31 line 57, dollars per million commits |
+| Write mix p999, zou on MinIO | no line | 294.6 ms | reported | zou-minio on GamingPC | 2026-08-31 | context for the row above it, the parked read |
+
+The three write mix rows are one run each on gamingpc, 8 clients, 60 s, the database loaded fresh before each. They are reported rather than judged because neither milestone writes a tps line at this scale, and the vanilla row is the low end of what that binary does here: it was handed 128 MB of shared buffers against zou dev's 7.8 GB and still finished twice the transactions.
+Write amplification is the row to read first. A pgbench transaction produces about 575 bytes of WAL and this store wrote 78 KiB for each one on the filesystem leg and 109 KiB on MinIO, nearly all of it whole shard objects rewritten because part of one changed. That is a layout cost rather than a workload cost, which is why the dollars per million row below moves with it.
+Both dollar rows are the measured op counts priced on aws-s3-standard, so they say what these runs would have cost against a real bucket. The two legs ran the same binary on the same workload and one costs 3.4x the other, entirely because it issued 9.3x the requests, which is tamnd/zou#741.
+
 ## Where the numbers came from
 
 - `cold-attach-zou-localfs-gamingpc-20260806T182641.json`
 - `cold-attach-zou-minio-server3-20260806T215955.json`
 - `fleet-1000-warm-zou-fleet-1000-warm-20260810T174813.json`
 - `fleet-800-idle-zou-fleet-800-idle-20260811T232022.json`
+- `select-scale100-pg18-20260831T051202.json`
+- `select-scale100-zou-localfs-20260831T051533.json`
+- `select-scale100-zou-minio-20260831T050737.json`
+- `tpcb-scale100-pg18-20260831T051051.json`
+- `tpcb-scale100-zou-localfs-20260831T051417.json`
+- `tpcb-scale100-zou-minio-20260831T050605.json`

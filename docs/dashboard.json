@@ -112,6 +112,83 @@
       "date": "2026-08-11T23:20:22Z",
       "source": "fleet-800-idle-zou-fleet-800-idle-20260811T232022.json"
     },
+    "pgbench-100-amp-localfs": {
+      "value": 138.085,
+      "label": "zou-localfs",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:14:17Z",
+      "source": "tpcb-scale100-zou-localfs-20260831T051417.json"
+    },
+    "pgbench-100-amp-minio": {
+      "value": 194.876,
+      "label": "zou-minio",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:06:05Z",
+      "source": "tpcb-scale100-zou-minio-20260831T050605.json"
+    },
+    "pgbench-100-select-localfs": {
+      "value": 36660.261856,
+      "label": "zou-localfs",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:15:33Z",
+      "source": "select-scale100-zou-localfs-20260831T051533.json"
+    },
+    "pgbench-100-select-minio": {
+      "value": 34042.515387,
+      "label": "zou-minio",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:07:37Z",
+      "source": "select-scale100-zou-minio-20260831T050737.json"
+    },
+    "pgbench-100-select-pg18": {
+      "value": 102006.758364,
+      "label": "pg18",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:12:02Z",
+      "source": "select-scale100-pg18-20260831T051202.json"
+    },
+    "pgbench-100-tpcb-localfs": {
+      "value": 763.458563,
+      "label": "zou-localfs",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:14:17Z",
+      "source": "tpcb-scale100-zou-localfs-20260831T051417.json"
+    },
+    "pgbench-100-tpcb-minio": {
+      "value": 842.065413,
+      "label": "zou-minio",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:06:05Z",
+      "source": "tpcb-scale100-zou-minio-20260831T050605.json"
+    },
+    "pgbench-100-tpcb-minio-p999": {
+      "value": 294.57,
+      "label": "zou-minio",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:06:05Z",
+      "source": "tpcb-scale100-zou-minio-20260831T050605.json"
+    },
+    "pgbench-100-tpcb-pg18": {
+      "value": 1553.346295,
+      "label": "pg18",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:10:51Z",
+      "source": "tpcb-scale100-pg18-20260831T051051.json"
+    },
+    "pgbench-100-usd-localfs": {
+      "value": 2.7619,
+      "label": "zou-localfs",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:14:17Z",
+      "source": "tpcb-scale100-zou-localfs-20260831T051417.json"
+    },
+    "pgbench-100-usd-minio": {
+      "value": 0.816,
+      "label": "zou-minio",
+      "host": "GamingPC",
+      "date": "2026-08-31T05:06:05Z",
+      "source": "tpcb-scale100-zou-minio-20260831T050605.json"
+    },
     "provision-rate": {
       "value": 0.08566666666666665,
       "label": "zou-fleet-800-idle",
