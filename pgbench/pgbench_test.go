@@ -110,3 +110,23 @@ func itoa64(n int64) string {
 	}
 	return string(digits)
 }
+
+func TestDSNPartsReadsWhatAWireClientNeeds(t *testing.T) {
+	addr, user, db := DSNParts("host=127.0.0.1 port=54311 dbname=postgres user=zoubench")
+	if addr != "127.0.0.1:54311" || user != "zoubench" || db != "postgres" {
+		t.Fatalf("got %q %q %q", addr, user, db)
+	}
+	// A host that is a directory is a socket directory, the way libpq
+	// reads it, and the port names the file inside it rather than a
+	// tcp port.
+	addr, _, _ = DSNParts("host=/tmp/zou port=5497")
+	if addr != filepath.Join("/tmp/zou", ".s.PGSQL.5497") {
+		t.Fatalf("socket path %q", addr)
+	}
+	// The defaults are libpq's, so a DSN that names only a port still
+	// dials somewhere rather than dialing ":5432".
+	addr, _, db = DSNParts("port=6000")
+	if addr != "127.0.0.1:6000" || db != "postgres" {
+		t.Fatalf("got %q %q", addr, db)
+	}
+}

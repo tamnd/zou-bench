@@ -160,3 +160,27 @@ func TestEveryCheckedInScenarioLoads(t *testing.T) {
 		}
 	}
 }
+
+func TestTheWireDriverOnlyRunsTheTransactionItTimes(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	if _, _, err := Load(write("ok.json", `{"name":"w","driver":"wire","builtin":"tpcb-like"}`)); err != nil {
+		t.Fatalf("tpcb-like refused: %v", err)
+	}
+	for name, body := range map[string]string{
+		"other-builtin.json": `{"name":"w","driver":"wire","builtin":"select-only"}`,
+		"a-script.json":      `{"name":"w","driver":"wire","script":"mine.sql"}`,
+		"a-rate.json":        `{"name":"w","driver":"wire","rate":500}`,
+		"unknown.json":       `{"name":"w","driver":"psql"}`,
+	} {
+		if _, _, err := Load(write(name, body)); err == nil {
+			t.Errorf("%s loaded", name)
+		}
+	}
+}

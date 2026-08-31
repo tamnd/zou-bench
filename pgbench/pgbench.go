@@ -49,6 +49,36 @@ func DSNArgs(dsn string) []string {
 	return append(args, db)
 }
 
+// DSNParts turns the same DSN into what a client that speaks the wire
+// protocol itself needs: an address to dial, a role, and a database.
+// The address is a host:port pair, or the socket path when the DSN
+// names a directory rather than a host, which is how libpq reads it too.
+func DSNParts(dsn string) (addr, user, database string) {
+	kv := map[string]string{}
+	for _, part := range strings.Fields(dsn) {
+		if k, v, ok := strings.Cut(part, "="); ok {
+			kv[k] = v
+		}
+	}
+	host, port := kv["host"], kv["port"]
+	if port == "" {
+		port = "5432"
+	}
+	if strings.ContainsAny(host, `/\`) {
+		addr = filepath.Join(host, ".s.PGSQL."+port)
+	} else {
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		addr = host + ":" + port
+	}
+	database = kv["dbname"]
+	if database == "" {
+		database = "postgres"
+	}
+	return addr, kv["user"], database
+}
+
 var summaryPatterns = []struct {
 	re  *regexp.Regexp
 	key string

@@ -36,6 +36,8 @@ The server under test is started by you, not the harness, except in `attach` whe
 
 From pgbench: tps, average latency and stddev, initial connection time, transactions processed and failed, per statement latencies from `-r`, and init wall time split into its phases (generate, vacuum, primary keys) when the scenario loads data.
 
+A scenario with `"driver": "wire"` runs the same tpcb-like transaction from inside the harness instead, over the same wire protocol pgbench uses, one connection per client and no prepared statements, and times every statement in it. What that buys is `statement_ms`: a full distribution for each of the seven round trips of the transaction, keyed the way the tables read, beside the distribution of the whole transaction. pgbench reports per statement latencies as means only, so a bound on one statement's tail cannot be read off a pgbench run at all, which is what left the accounts update p99 unanswerable with a 0.352 ms mean beside a 36.8 ms transaction p99. The wire driver reports `tps`, `transactions`, `failed` and `latency_avg_ms` the same way pgbench's summary block does, so the two drivers land in one table and the rate one reaches is a check on the other rather than a footnote.
+
 From the per transaction log (`-l`): real latency percentiles p50, p90, p95, p99, p999, max, mean, and stddev over every transaction, plus 30 second buckets with per bucket tps, p50, and p99 so a flat average cannot hide a stall.
 
 Those logs are then kept, as `<result stem>.txnlog.tar.gz` next to the result json, with one file per pgbench thread the way pgbench wrote them. The percentiles above are computed from them and cannot be recomputed without them, so a published tail whose logs went out with a temporary directory is a number nobody can check and a bucket width nobody can change their mind about later. They compress about ten to one, which is what makes keeping them affordable at a few hundred thousand transactions a run.
@@ -224,6 +226,7 @@ A run where each socket is a different signed in user is a different measurement
 
 - `tpcb-scale100`: pgbench tpcb-like, scale 100, 8 clients, 60 s, with data load.
 - `select-scale100`: pgbench select-only on the loaded scale 100 data.
+- `tpcb-scale100-wire`: the same shape driven from inside the harness, which is the one that carries a per statement tail.
 - `tpcb-scale1000`: scale 1000, dataset larger than RAM on most boxes, 32 clients, 5 min.
 - `rest-warm-reads`: the REST read mix a small app makes, 8 clients, 60 s, against the tenant `rest-demo.sql` builds.
 - `fleet-1000`: a thousand small projects on one node with a hundred attached at once, a steady phase over a working set that fits and a churn phase over all thousand.
