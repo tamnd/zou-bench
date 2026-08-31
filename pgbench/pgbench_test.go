@@ -130,3 +130,25 @@ func TestDSNPartsReadsWhatAWireClientNeeds(t *testing.T) {
 		t.Fatalf("got %q %q", addr, db)
 	}
 }
+
+func TestADSNWithNoRoleGetsTheAccountRunningIt(t *testing.T) {
+	// The baseline scenarios connect over a socket and never name a
+	// user, because pgbench and psql take the account for granted. A
+	// wire client has to spell it out: a startup packet with an empty
+	// user is refused with "no PostgreSQL user name specified in
+	// startup packet" before a single statement is sent, which is what
+	// happened to the first vanilla leg of the scale 100 wire run.
+	t.Setenv("PGUSER", "someone")
+	if _, user, _ := DSNParts("host=/tmp/zou port=5432"); user != "someone" {
+		t.Fatalf("user %q, wanted the one PGUSER names", user)
+	}
+	t.Setenv("PGUSER", "")
+	_, user, _ := DSNParts("host=/tmp/zou port=5432")
+	if user == "" {
+		t.Fatal("no user at all, which the server refuses")
+	}
+	// An explicit user still wins over both.
+	if _, user, _ := DSNParts("host=/tmp/zou port=5432 user=zoubench"); user != "zoubench" {
+		t.Fatalf("user %q, wanted the one the DSN names", user)
+	}
+}
