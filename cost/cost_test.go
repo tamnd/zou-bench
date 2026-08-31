@@ -115,16 +115,25 @@ func TestTransferIsChargedOnTopOfTheRequestInRegion(t *testing.T) {
 	}
 }
 
-func TestTxnsTurnOpsCostIntoDollarsPerMillionCommits(t *testing.T) {
+// The two divisors are close and are not the same, so both are priced
+// and each line says which it divided by. A transaction the driver
+// retried is two transactions and one commit, and the difference between
+// the two columns is where that shows up.
+func TestTxnsAndCommitsArePricedSeparately(t *testing.T) {
 	got := Compute(retail(), Usage{
 		Puts:     100_000,
 		Gets:     1_000_000,
 		Measured: true,
 		Txns:     50_000,
+		Commits:  45_000,
 	})
 	// 0.5 + 0.4 = 0.9 dollars over 50k txns is 18 dollars per million.
 	if got["usd_per_million_txns"].(float64) != 18.0 {
 		t.Fatalf("per million txns = %v", got["usd_per_million_txns"])
+	}
+	// The same 0.9 over 45k commits is 20.
+	if got["usd_per_million_commits"].(float64) != 20.0 {
+		t.Fatalf("per million commits = %v", got["usd_per_million_commits"])
 	}
 }
 
@@ -152,6 +161,9 @@ func TestAMissingDivisorLeavesItsLineOut(t *testing.T) {
 	}
 	if _, present := got["usd_per_gb_ingested"]; present {
 		t.Fatal("dollars per GB for a run with no ingest measured")
+	}
+	if _, present := got["usd_per_million_commits"]; present {
+		t.Fatal("dollars per commit for a run whose commits nobody counted")
 	}
 }
 

@@ -111,6 +111,21 @@ Stamped runs carry the sim spec in the result json and wear a `(sim)` marker in 
 Cost simulation rides on the stamp: a run simulated as `s3-standard` prices its measured op counts with the matching aws-s3-standard card automatically, so a local MinIO run answers what the same workload would have cost on AWS.
 The op counts are real, only the latency was simulated, and an explicit `--pricecard` still wins.
 When op counts and transactions were both measured, the cost block adds `usd_per_million_txns`, the request dollars per million transactions, which the report shows as `$/M txns`.
+It also adds `usd_per_million_commits` from `pg_stat_database.xact_commit`, the server's own count over the same window, which is close to the transaction count and not equal to it: a transaction the driver retried is two transactions and one commit.
+
+## Pricing a result that already ran
+
+A run is priced once, when it finishes, on whichever card the invocation named.
+`zoubench cost` prices a recorded result again, against every card in the directory, without running anything.
+
+```
+./zoubench cost results/tpcb-scale100-zou-minio-*.json
+./zoubench cost --cards aws-s3-standard,cloudflare-r2 --json results/*.json
+```
+
+Nothing here measures anything. It reads the op counts and the footprint back out of the result file and multiplies, which is why a file with no counters in it is reported as having none rather than priced at zero.
+Both shapes are priced: a run result gets the workload table, a fleet result gets the month of mostly idle projects, and `--box-usd-month` and `--box-source` put a compute line on the second.
+A card with no prices in it, which is what tamnd/zou exports for a machine you own, is skipped with a line on stderr rather than shown as the cheapest store on the page.
 
 ## Fleet runs
 

@@ -316,6 +316,15 @@ func cmdRun(argv []string) {
 	if n, ok := result["transactions"].(int); ok {
 		usage.Txns = int64(n)
 	}
+	// Commits as the server counted them, which is the divisor M1b asks
+	// the cost line to use. The driver's transaction count is the one
+	// above and they are close but not equal, so both are carried and
+	// each says which it is.
+	if d, ok := result["pg_delta"].(map[string]map[string]float64); ok {
+		if c, ok := d["database"]["xact_commit"]; ok && c > 0 {
+			usage.Commits = int64(c)
+		}
+	}
 
 	// A simulated run against a provider profile prices itself with
 	// that provider's card by default: the op counts are real, only
